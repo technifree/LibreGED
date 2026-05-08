@@ -27,7 +27,7 @@ jobs:
 
       - name: Compiler avec PyInstaller
         run: |
-          py -m PyInstaller `
+          python -m PyInstaller `
             --noconfirm `
             --onedir `
             --windowed `
