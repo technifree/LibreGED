@@ -20,7 +20,7 @@ XlsxWriter==3.2.3
 
 # ── Images ────────────────────────────────────────────────────────────────────
 pillow==11.2.1
-pyheif==0.8.0
+pillow-heif==0.22.0
 
 # ── Data / Visualisation ──────────────────────────────────────────────────────
 # ✅ Versions épinglées pour compatibilité PyInstaller + Python 3.10
