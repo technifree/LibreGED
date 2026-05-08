@@ -1,0 +1,159 @@
+from pathlib import Path
+import sys
+import shutil
+import json
+
+def get_internal_dir() -> Path:
+    """Répertoire _internal/ du bundle PyInstaller (lecture seule)."""
+    if hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS)
+    return Path(__file__).resolve().parent
+
+def get_base_dir() -> Path:
+    """Répertoire à côté du binaire (lecture/écriture pour les données utilisateur)."""
+    if hasattr(sys, "_MEIPASS"):
+        return Path(sys.executable).resolve().parent  # LibreGED/, pas _internal/
+    return Path(__file__).resolve().parent
+
+# 1. Répertoire interne (assets bundlés, lecture seule)
+INTERNAL_DIR        = get_internal_dir()
+INTERNAL_DB         = INTERNAL_DIR / "database" / "ged.db"
+INTERNAL_FILES_DIR  = INTERNAL_DIR / "files"
+INTERNAL_ASSETS_DIR = INTERNAL_DIR / "assets"
+
+# 2. Répertoire utilisateur (données persistantes, lecture/écriture)
+USER_DATA_DIR = get_base_dir()
+USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+# --- Copier la DB interne si besoin ---
+DB_PATH = USER_DATA_DIR / "ged.db"
+if not DB_PATH.exists() and INTERNAL_DB.exists():
+    shutil.copy(INTERNAL_DB, DB_PATH)
+
+# --- Copier le dossier files interne si besoin ---
+FILES_DIR = USER_DATA_DIR / "files"
+if not FILES_DIR.exists() and INTERNAL_FILES_DIR.exists():
+    shutil.copytree(INTERNAL_FILES_DIR, FILES_DIR)
+FILES_DIR.mkdir(parents=True, exist_ok=True)
+
+# --- Copier le config.json initial si besoin ---
+CONFIG_PATH = USER_DATA_DIR / "config.json"
+if not CONFIG_PATH.exists() and (INTERNAL_ASSETS_DIR / "config.json").exists():
+    shutil.copy(INTERNAL_ASSETS_DIR / "config.json", CONFIG_PATH)
+
+# 3. Assets lecture seule restent dans le bundle
+ASSETS_DIR     = INTERNAL_ASSETS_DIR
+LANGUAGES_PATH = ASSETS_DIR / "languages.json"
+SPINNER_GIF    = ASSETS_DIR / "spinner.gif"
+
+
+# Thèmes considérés comme sombres (logo blanc)
+_DARK_THEMES = {"dark", "twilight", "ocean", "forest", "sunset",
+                "rose", "slate", "midnight", "brown"}
+
+def get_logo_path(theme: str) -> Path:
+    return ASSETS_DIR / ("proxy-imageDM.png" if theme in _DARK_THEMES else "proxy-image.png")
+
+
+def save_user_language(lang_code):
+    data = {}
+    config_path = get_config_path()
+
+    if config_path.exists():
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as e:
+            print(f"Error loading config for language: {e}")
+
+    data["language"] = lang_code
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"Error saving language to config: {e}")
+
+
+def load_user_language():
+    config_path = get_config_path()
+    if config_path.exists():
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data.get("language", "fr")
+        except Exception as e:
+            print(f"Error loading language from config: {e}")
+    return "fr"
+
+
+def save_user_theme(theme_name):
+    data = {}
+    config_path = get_config_path()
+
+    if config_path.exists():
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as e:
+            print(f"Error loading config for theme: {e}")
+
+    data["theme"] = theme_name
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"Error saving theme to config: {e}")
+
+
+def load_user_theme():
+    config_path = get_config_path()
+    if config_path.exists():
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data.get("theme", "light")
+        except Exception as e:
+            print(f"Error loading theme from config: {e}")
+    return "light"
+
+
+def get_config_path() -> Path:
+    """Chemin vers le config.json persistant (toujours dans USER_DATA_DIR)."""
+    return CONFIG_PATH
+
+
+def load_config():
+    config_path = get_config_path()
+    if config_path.exists():
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Error loading config: {e}")
+    return {}
+
+
+def save_config(data):
+    config_path = get_config_path()
+    try:
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"Error saving config: {e}")
+
+
+def load_locked_symlinks() -> set:
+    """Charge la liste des chemins de symlinks verrouillés depuis config.json."""
+    data = load_config()
+    return set(data.get("locked_symlinks", []))
+
+
+def save_locked_symlinks(locked: set):
+    """Sauvegarde la liste des chemins de symlinks verrouillés dans config.json."""
+    data = load_config()
+    data["locked_symlinks"] = sorted(locked)
+    save_config(data)

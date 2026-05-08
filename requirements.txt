@@ -1,0 +1,53 @@
+# ── Interface graphique ───────────────────────────────────────────────────────
+PySide6==6.9.0
+PySide6_Addons==6.9.0
+PySide6_Essentials==6.9.0
+shiboken6==6.9.0
+QtAwesome==1.4.0
+QtPy==2.4.3
+
+# ── PDF / Documents ───────────────────────────────────────────────────────────
+PyMuPDF==1.25.5
+python-docx==1.1.2
+python-pptx==1.0.2
+openpyxl==3.1.5
+odfpy==1.4.1
+EbookLib==0.19
+mammoth==1.9.0
+reportlab==4.4.0
+lxml==5.4.0
+XlsxWriter==3.2.3
+
+# ── Images ────────────────────────────────────────────────────────────────────
+pillow==11.2.1
+pyheif==0.8.0
+
+# ── Data / Visualisation ──────────────────────────────────────────────────────
+# ✅ Versions épinglées pour compatibilité PyInstaller + Python 3.10
+pandas==2.1.4
+numpy==1.26.4
+matplotlib==3.7.1
+
+# ── Web / Parsing ─────────────────────────────────────────────────────────────
+beautifulsoup4==4.13.4
+soupsieve==2.7
+requests==2.32.3
+charset-normalizer==3.4.2
+certifi==2025.4.26
+idna==3.10
+urllib3==2.4.0
+
+# ── Utilitaires ───────────────────────────────────────────────────────────────
+humanize==4.12.3
+bcrypt==4.3.0
+python-dateutil==2.9.0.post0
+pytz==2025.2
+tzdata==2025.2
+typing_extensions==4.13.2
+six==1.17.0
+packaging==25.0
+filelock==3.18.0
+
+# ── Build ─────────────────────────────────────────────────────────────────────
+pyinstaller==6.13.0
+pyinstaller-hooks-contrib==2025.4
