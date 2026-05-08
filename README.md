@@ -1,50 +1,157 @@
-**LibreGED**
-*Gestionnaire de fichier simple pour GED personnelle*
+<div align="center">
 
-version du: **08/05/2026**
+<img src="assets/icons/favicon.ico" width="80" alt="LibreGED"/>
 
-site web de l'application : https://technifree.com
+# LibreGED
 
-**Fonctionnalités**
-- Naviguer dans les répertoires et les fichiers de GED
-- Prévisualisation de différents types de fichiers (PDF, Excel, Word, Powerpoint, Markdown, images, html, etc.)
-- Modifier et enregistrer les métadonnées des fichiers
-- Actualiser le répertoire pour charger les nouveaux fichiers de votre GED
-- Recherche de texte dans les fichiers des répertoires de votre GED ainsi que dans les mots clés (tags)
-- Afficher des informations supplémentaires pour chacun de vos fichiers (commentaires) et assurer un versionning des fichiers
-- Fonction de sauvegarde manuelle de votre GED dans un fichier compressé (datée)
-- Multi langue (fr, en, de, es, it, nl...) et gestion du thème sombre / clair
-- Possibilité d'ajouter des fichiers n'importe où sur votre disque, soit en créant un lien (raccourci vers le fichier), soit en le copiant dans le répertoire de la GED.
-- Présentation de l'application LibreGED
-  
-L'application LibreGED est une solution simple de gestion documentaire, conçue pour répondre aux besoins des utilisateurs en matière de stockage, d'organisation, de prévisualisation, et de gestion des informations des documents.
-Développée pour une utilisation personnelle, LibreGED est une application robuste, portable et sécurisée, compatible avec divers formats de fichiers.
+**Gestionnaire de documents personnel — simple, portable et puissant**
 
-**Fonctionnalités Clés**
+[![Version](https://img.shields.io/badge/version-2.7.1-blue?style=flat-square)](https://github.com/technifree/LibreGED/releases)
+[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-lightgrey?style=flat-square)](https://github.com/technifree/LibreGED/releases)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-yellow?style=flat-square&logo=python)](https://python.org)
+[![PySide6](https://img.shields.io/badge/PySide6-6.9-green?style=flat-square)](https://doc.qt.io/qtforpython/)
+[![License](https://img.shields.io/badge/license-MIT-orange?style=flat-square)](LICENSE)
+[![Website](https://img.shields.io/badge/website-technifree.com-blueviolet?style=flat-square)](https://technifree.com)
 
-- Gestion et Organisation des Documents :
-> Parcourez et gérez vos documents à l'aide d'une arborescence de fichiers intuitive et réactive.
-> Prise en charge de multiples formats de fichiers, y compris PDF, DOCX, XLSX, ODT, PPTX, html, MD, TXT, images, et plus encore.
-> Recherche avancée permettant de localiser rapidement les documents nécessaires.
+*Mise à jour : 08 mai 2026*
 
-- Prévisualisation des Fichiers :
-> Visualisez instantanément vos documents directement dans l'application, sans avoir besoin de les ouvrir dans des logiciels tiers.
-> Prise en charge des PDF, avec outils de navigation et de zoom pour visualiser chaque page.
-> Prévisualisation améliorée des documents Word, Excel, PowerPoint, et des images.
-> Possibilité de zoomer sur les images
+[Site web](https://technifree.com) &nbsp;·&nbsp; [Télécharger](https://github.com/technifree/LibreGED/releases) &nbsp;·&nbsp; [Signaler un bug](https://github.com/technifree/LibreGED/issues)
 
-- Gestion des Métadonnées
-> Associez des métadonnées à chaque document, telles que la date de modification, la version, l'auteur, les Tags ainsi que des commentaires personnalisés.
-> Sauvegardez facilement ces informations en base de données pour un accès rapide, une recherche et une gestion simplifiée.
+</div>
 
-** Fonctionnalités Avancées**
-> Responsive Design : L'interface utilisateur est entièrement responsive, s'adaptant à toutes les tailles d'écran pour une expérience utilisateur optimale.
-> Ouverture Rapide des Dossiers : Accédez rapidement au dossier contenant le fichier sélectionné pour une gestion encore plus fluide (par clic droit).
-> Support Multiplateforme : Disponible sous Windows et Linux, avec une distribution portable pour une utilisation facile sans installation préalable.
-> Mode clair ou sombre : Choisissez entre le mode clair ou sombre suivant vos envies (12 thèmes disponibles).
-> Multi-langue : Disponible en Français, en Anglais, en Allemand, en Italien, en Espagnol et en Néerlandais (et bien d'autres Européennes).
+---
 
-** Sécurité et Performance**
-L'application LibreGED a été conçue avec la sécurité comme priorité. Le code est sécurisé, l'accès aux fichiers est limité, et les fichiers de données sont correctement gérés pour éviter tout accès non autorisé. De plus, l'application est optimisée pour des performances élevées, même avec de grands volumes de documents.
+## Présentation
 
-LibreGED est l'outil idéal pour les particuliers cherchant à améliorer leur gestion documentaire personnelle. Avec son interface intuitive, ses puissantes fonctionnalités de prévisualisation, et sa gestion avancée des métadonnées, LibreGED offre une solution simple pour tous vos besoins en matière de gestion de documents.
+**LibreGED** est une solution simple et légère de **Gestion Électronique de Documents** (GED), conçue pour les utilisateurs souhaitant organiser, prévisualiser et gérer leurs documents personnels sans complexité.
+
+Développée avec **Python** et **PySide6**, LibreGED est une application **portable**, **sécurisée** et **multiplateforme**, compatible avec une large variété de formats de fichiers.
+
+---
+
+## Fonctionnalités
+
+### Navigation & Organisation
+
+- Arborescence de fichiers intuitive et réactive
+- Navigation visuelle style Nautilus avec aperçus en vignettes
+- Formats supportés : **PDF, DOCX, XLSX, ODT, PPTX, HTML, MD, TXT, images...**
+- Ajout de fichiers par **copie** ou **lien symbolique** vers n'importe quel emplacement du disque
+- Accès rapide au dossier contenant le fichier sélectionné (clic droit)
+
+### Prévisualisation intégrée
+
+- Visualisation instantanée sans ouvrir d'application tierce
+- PDF avec navigation page par page et zoom
+- Prévisualisation de Word, Excel, PowerPoint, images, HTML, Markdown
+- Zoom sur les images
+
+### Métadonnées & Recherche
+
+- Association de **métadonnées** à chaque document : auteur, version, date, tags, commentaires
+- **Recherche avancée** dans les noms, les contenus et les tags
+- Base de données SQLite locale pour un accès rapide
+
+### Sauvegarde
+
+- Sauvegarde manuelle de la GED dans une **archive compressée datée**
+
+---
+
+## Interface
+
+LibreGED propose **12 thèmes** sélectionnables depuis l'application :
+
+| Thèmes clairs | Thèmes sombres |
+|---|---|
+| Clair, Arctique, Sépia | Sombre, Café, Crépuscule |
+| | Océan, Forêt, Coucher de soleil |
+| | Rose, Ardoise, Minuit |
+
+L'interface est entièrement **responsive** et s'adapte à toutes les tailles d'écran.
+
+---
+
+## Langues supportées
+
+Français, Anglais, Allemand, Italien, Espagnol, Néerlandais, Portugais, Polonais, Suédois, Danois, Finnois, Grec, Tchèque.
+
+---
+
+## Compatibilité
+
+| Système | Support |
+|---|:---:|
+| Linux (Ubuntu 22.04+, Mint, Debian, LMDE...) | Oui |
+| Windows 10 / 11 | Oui |
+| Distribution portable (sans installation) | Oui |
+
+---
+
+## Installation
+
+Rendez-vous sur la page [**Releases**](https://github.com/technifree/LibreGED/releases) et téléchargez l'archive correspondant à votre système.
+
+**Linux**
+```bash
+tar -xzf LibreGED-linux.tar.gz
+cd LibreGED
+./LibreGED
+```
+
+**Windows**
+```
+Décompresser LibreGED-windows.zip
+Double-cliquer sur LibreGED.exe
+```
+
+> Aucune installation requise. LibreGED est entièrement portable.
+
+---
+
+## Compilation depuis les sources
+
+Prérequis : Python 3.10+, pip
+
+```bash
+git clone https://github.com/technifree/LibreGED.git
+cd LibreGED
+python -m venv venv
+source venv/bin/activate        # Windows : venv\Scripts\activate
+pip install -r requirements.txt
+python main.py
+```
+
+Build Linux (via Docker) :
+```bash
+./build_linux.sh
+```
+
+Build Windows (via GitHub Actions) :
+```bash
+./build_windows.sh master
+```
+
+---
+
+## Sécurité & Performance
+
+- Accès aux fichiers limité au répertoire GED configuré
+- Données stockées localement dans une base SQLite
+- Aucune donnée transmise vers l'extérieur
+- Optimisé pour les grands volumes de documents
+
+---
+
+## Licence
+
+LibreGED est distribué sous licence **MIT**.  
+Voir le fichier [LICENSE](LICENSE) pour plus de détails.
+
+---
+
+<div align="center">
+
+Développé par [technifree](https://technifree.com)
+
+</div>
