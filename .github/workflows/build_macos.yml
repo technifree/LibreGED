@@ -1,0 +1,82 @@
+name: Build macOS
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Installer les dépendances
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip uninstall -y pathlib || true
+
+      - name: Compiler avec PyInstaller
+        run: |
+          python -m PyInstaller \
+            --noconfirm \
+            --onedir \
+            --windowed \
+            --icon=assets/icons/favicon.ico \
+            --name=LibreGED \
+            --distpath=dist \
+            --add-data "assets:assets" \
+            --add-data "files:files" \
+            --add-data "config.py:." \
+            --add-data "styles.py:." \
+            --hidden-import=views \
+            --hidden-import=views.main_window \
+            --hidden-import=views.folder_browser \
+            --hidden-import=database \
+            --hidden-import=database.db \
+            --hidden-import=database.reindex \
+            --hidden-import=database.odf_utils \
+            --hidden-import=database.path_utils \
+            --hidden-import=pymupdf \
+            --hidden-import=fitz \
+            --hidden-import=numpy \
+            --hidden-import=matplotlib \
+            --hidden-import=pandas \
+            --hidden-import=reportlab \
+            --hidden-import=ebooklib \
+            --hidden-import=bs4 \
+            --hidden-import=odf \
+            --hidden-import=docx \
+            --hidden-import=openpyxl \
+            --hidden-import=lxml \
+            --hidden-import=pptx \
+            --hidden-import=mammoth \
+            --hidden-import=humanize \
+            --hidden-import=qtawesome \
+            --hidden-import=PIL \
+            --hidden-import=PIL.Image \
+            --hidden-import=PIL.ImageQt \
+            --hidden-import=PySide6.QtWebEngineWidgets \
+            --hidden-import=PySide6.QtWebEngineCore \
+            --hidden-import=PySide6.QtWebEngine \
+            --hidden-import=PySide6.QtPrintSupport \
+            --collect-all=qtawesome \
+            --collect-all=pymupdf \
+            --collect-all=fitz \
+            main.py
+
+      - name: Créer l'archive
+        run: cd dist && zip -r ../LibreGED-macos.zip LibreGED/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LibreGED-macos
+          path: LibreGED-macos.zip
+          retention-days: 30
