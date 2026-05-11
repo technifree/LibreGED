@@ -26,7 +26,7 @@ pillow-heif==0.22.0
 # ✅ Versions épinglées pour compatibilité PyInstaller + Python 3.10
 pandas==2.1.4
 numpy==1.26.4
-matplotlib==3.7.1
+matplotlib==3.9.4
 
 # ── Web / Parsing ─────────────────────────────────────────────────────────────
 beautifulsoup4==4.13.4
