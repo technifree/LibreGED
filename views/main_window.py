@@ -1,4 +1,4 @@
-# LibreGED v2.8.0 - 08/05/2026
+# LibreGED v2.8.1 - 11/05/2026
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QPushButton, QLabel, QLineEdit, QTextEdit,
@@ -17,7 +17,8 @@ from PySide6.QtCore import (
 
 from PySide6.QtGui import (
     QPixmap, QImage, QIcon, QTransform, QAction, QPalette, QColor, QFont,
-    QTextOption, QDesktopServices, QGuiApplication, QDrag
+    QTextOption, QDesktopServices, QGuiApplication, QDrag,
+    QKeySequence, QTextCursor, QTextCharFormat, QShortcut
 )
 
 from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -951,6 +952,59 @@ class MainWindow(QMainWindow):
         # Ajout du preview_content_widget à l'interface
         self.preview_layout.addWidget(self.preview_frame)
 
+
+        # === Barre de recherche Ctrl+F ===
+        self.search_bar_widget = QWidget()
+        self.search_bar_widget.setVisible(False)
+        search_bar_layout = QHBoxLayout(self.search_bar_widget)
+        search_bar_layout.setContentsMargins(6, 4, 6, 4)
+        search_bar_layout.setSpacing(6)
+
+        self.find_input = QLineEdit()
+        self.find_input.setPlaceholderText(self.t("find_placeholder") if "find_placeholder" in self.translations.get(self.current_language, {}) else "Rechercher...")
+        self.find_input.setFixedHeight(28)
+        self.find_input.setMinimumWidth(200)
+        self.find_input.returnPressed.connect(self._find_next)
+        self.find_input.textChanged.connect(self._find_reset)
+
+        self.find_prev_btn = QPushButton()
+        self.find_prev_btn.setIcon(qta.icon("fa5s.chevron-up", color="#888"))
+        self.find_prev_btn.setFixedSize(28, 28)
+        self.find_prev_btn.setToolTip(self.t("find_prev") if "find_prev" in self.translations.get(self.current_language, {}) else "Précédent")
+        self.find_prev_btn.clicked.connect(self._find_prev)
+
+        self.find_next_btn = QPushButton()
+        self.find_next_btn.setIcon(qta.icon("fa5s.chevron-down", color="#888"))
+        self.find_next_btn.setFixedSize(28, 28)
+        self.find_next_btn.setToolTip(self.t("find_next") if "find_next" in self.translations.get(self.current_language, {}) else "Suivant")
+        self.find_next_btn.clicked.connect(self._find_next)
+
+        self.find_count_label = QLabel("")
+        self.find_count_label.setFixedWidth(90)
+        self.find_count_label.setAlignment(Qt.AlignCenter)
+
+        self.find_close_btn = QPushButton()
+        self.find_close_btn.setIcon(qta.icon("fa5s.times", color="#888"))
+        self.find_close_btn.setFixedSize(28, 28)
+        self.find_close_btn.clicked.connect(self._close_search_bar)
+
+        search_bar_layout.addWidget(self.find_input)
+        search_bar_layout.addWidget(self.find_prev_btn)
+        search_bar_layout.addWidget(self.find_next_btn)
+        search_bar_layout.addWidget(self.find_count_label)
+        search_bar_layout.addStretch()
+        search_bar_layout.addWidget(self.find_close_btn)
+
+        self.preview_layout.addWidget(self.search_bar_widget)
+
+        # Raccourci Ctrl+F
+        self._find_shortcut = QShortcut(QKeySequence("Ctrl+F"), self)
+        self._find_shortcut.activated.connect(self._toggle_search_bar)
+
+        # Échap pour fermer
+        self._find_esc = QShortcut(QKeySequence("Escape"), self.find_input)
+        self._find_esc.activated.connect(self._close_search_bar)
+
         # === Contrôles de zoom + PDF + navigation regroupés ===
         self.zoom_controls_widget = QWidget()
         self.zoom_controls_layout = QHBoxLayout(self.zoom_controls_widget)  
@@ -1283,7 +1337,7 @@ class MainWindow(QMainWindow):
         self.setWindowIcon(flag_icon)
 
         # 2) on assemble le texte
-        title = "LibreGED v.2.8.0"
+        title = "LibreGED v.2.8.1"
         if filename:
             title += f" – {filename}"
         self.setWindowTitle(title)
@@ -1588,6 +1642,336 @@ class MainWindow(QMainWindow):
             open_original_action.triggered.connect(lambda: self.open_real_folder(file_abs_path))
 
         menu.exec(self.tree.viewport().mapToGlobal(position))
+
+    # ─────────────────────────────────────────────────────────────────
+    # Recherche Ctrl+F dans la prévisualisation
+    # ─────────────────────────────────────────────────────────────────
+
+    def _schedule_search_highlight(self):
+        """Surligue le terme de la barre de recherche selon le widget actif."""
+        query = self.search_input.text().strip()
+        if not query:
+            return
+        keywords = [kw for kw in query.replace(",", " ").split() if kw]
+        if not keywords:
+            return
+        term = keywords[0]
+
+        current = self.preview_stack.currentWidget()
+
+        # QTextEdit (TXT, MD, code...)
+        if current is self.text_preview:
+            self._highlight_term_in_text_preview(term)
+
+        # QWebEngineView (HTML, DOCX, ODT, EPUB...)
+        elif self.html_preview and current is self.html_preview:
+            # QTimer : setHtml() déclenche loadFinished avant qu'on puisse s'y connecter
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(250, lambda t=term: self._highlight_term_in_webengine(t))
+
+        # QTableWidget via QTabWidget (XLSX, XLSM)
+        elif current is self.xlsx_tab_widget:
+            self._highlight_term_in_xlsx(term)
+
+        # QPixmap (PDF rendu via fitz)
+        elif current is self.image_scroll and hasattr(self, "pdf_doc") and self.pdf_doc:
+            self._highlight_term_in_pdf(term)
+
+    def _highlight_term_in_xlsx(self, term: str):
+        """Surligne les cellules correspondantes dans le QTableWidget XLSX."""
+        from styles import THEMES
+        from PySide6.QtGui import QBrush
+        t_palette = THEMES.get(self.current_theme, THEMES["light"])
+        accent = QColor("#FFD600")   # jaune vif
+        accent.setAlpha(220)
+        text_color = QColor("#1A1A1A")
+        term_lower = term.lower()
+
+        table = self.xlsx_tab_widget.currentWidget()
+        if not isinstance(table, QTableWidget):
+            return
+
+        first_match = None
+        for row in range(table.rowCount()):
+            for col in range(table.columnCount()):
+                item = table.item(row, col)
+                if item is None:
+                    continue
+                if term_lower in item.text().lower():
+                    item.setBackground(QBrush(accent))
+                    item.setForeground(QBrush(text_color))
+                    if first_match is None:
+                        first_match = item
+                else:
+                    item.setBackground(QBrush())  # reset
+                    item.setForeground(QBrush())
+
+        if first_match:
+            table.scrollToItem(first_match)
+
+    def _highlight_term_in_pdf(self, term: str):
+        """Surligne les occurrences texte sur la page PDF courante via PyMuPDF + QPainter."""
+        if not self.pdf_doc or not self.original_pixmap or not term:
+            return
+        try:
+            from PySide6.QtGui import QPainter, QBrush, QPen
+            from styles import THEMES
+            t_palette = THEMES.get(self.current_theme, THEMES["light"])
+            accent = QColor("#FFD600")   # jaune vif
+            accent.setAlpha(160)
+
+            page = self.pdf_doc.load_page(self.current_pdf_page)
+            rects = page.search_for(term)
+            if not rects:
+                return
+
+            # Facteur d'échelle fitz → pixmap
+            scale_x = self.original_pixmap.width()  / page.rect.width
+            scale_y = self.original_pixmap.height() / page.rect.height
+
+            # Peindre les overlays sur une copie du pixmap
+            highlighted = self.original_pixmap.copy()
+            painter = QPainter(highlighted)
+            painter.setRenderHint(QPainter.Antialiasing)
+            painter.setBrush(QBrush(accent))
+            painter.setPen(QPen(Qt.NoPen))
+
+            from PySide6.QtCore import QRectF
+            for r in rects:
+                x = r.x0 * scale_x
+                y = r.y0 * scale_y
+                w = (r.x1 - r.x0) * scale_x
+                h = (r.y1 - r.y0) * scale_y
+                painter.drawRoundedRect(QRectF(x, y, w, h), 2, 2)
+
+            painter.end()
+
+            # Remplacer le pixmap affiché (sans toucher à original_pixmap)
+            scaled = highlighted.scaled(
+                int(highlighted.width() * self.current_zoom),
+                int(highlighted.height() * self.current_zoom),
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
+            )
+            self.image_preview_label.setPixmap(scaled)
+            self.image_preview_label.adjustSize()
+
+        except Exception as e:
+            print(f"[WARN] PDF highlight: {e}")
+
+    def _highlight_term_in_text_preview(self, term: str):
+        """Surligne toutes les occurrences d'un terme dans QTextEdit."""
+        from styles import THEMES
+        t_palette = THEMES.get(self.current_theme, THEMES["light"])
+        accent = t_palette["accent"]
+
+        doc = self.text_preview.document()
+        text_lower = doc.toPlainText().lower()
+        term_lower = term.lower()
+
+        positions = []
+        start = 0
+        while True:
+            idx = text_lower.find(term_lower, start)
+            if idx == -1:
+                break
+            positions.append(idx)
+            start = idx + 1
+
+        if not positions:
+            return
+
+        fmt = QTextCharFormat()
+        fmt.setBackground(QColor("#FFD600"))
+        fmt.setForeground(QColor("#1A1A1A"))
+
+        extra_selections = []
+        for pos in positions:
+            cursor = QTextCursor(doc)
+            cursor.setPosition(pos)
+            cursor.movePosition(QTextCursor.Right, QTextCursor.KeepAnchor, len(term))
+            sel = QTextEdit.ExtraSelection()
+            sel.cursor = cursor
+            sel.format = fmt
+            extra_selections.append(sel)
+
+        self.text_preview.setExtraSelections(extra_selections)
+
+        # Scroller vers la première occurrence
+        if positions:
+            cursor = QTextCursor(doc)
+            cursor.setPosition(positions[0])
+            self.text_preview.setTextCursor(cursor)
+            self.text_preview.ensureCursorVisible()
+
+    def _highlight_term_in_webengine(self, term: str):
+        """Surligne le terme dans QWebEngineView via findText natif."""
+        if self.html_preview:
+            try:
+                self.html_preview.page().findText(term)
+            except Exception:
+                pass
+
+    def _toggle_search_bar(self):
+        """Affiche ou masque la barre de recherche."""
+        visible = self.search_bar_widget.isVisible()
+        if visible:
+            self._close_search_bar()
+        else:
+            self._apply_search_bar_style()
+            self.search_bar_widget.setVisible(True)
+            self.find_input.setFocus()
+            self.find_input.selectAll()
+
+    def _apply_search_bar_style(self):
+        """Applique le style de la barre selon le thème courant."""
+        from styles import THEMES
+        t = THEMES.get(self.current_theme, THEMES["light"])
+        self.search_bar_widget.setStyleSheet(f"""
+            QWidget {{
+                background-color: {t['surface2']};
+                border-top: 1px solid {t['border']};
+                border-radius: 0px;
+            }}
+            QLineEdit {{
+                background-color: {t['surface']};
+                color: {t['text']};
+                border: 1.5px solid {t['border']};
+                border-radius: 6px;
+                padding: 3px 8px;
+                font-size: 12px;
+            }}
+            QLineEdit:focus {{ border-color: {t['accent']}; }}
+            QPushButton {{
+                background-color: transparent;
+                border: none;
+                border-radius: 6px;
+            }}
+            QPushButton:hover {{ background-color: {t['hover']}; }}
+            QLabel {{ color: {t['text_secondary']}; font-size: 11px; background: transparent; }}
+        """)
+
+    def _close_search_bar(self):
+        """Ferme la barre et efface les surbrillances."""
+        self.search_bar_widget.setVisible(False)
+        self.find_input.clear()
+        self._clear_highlights()
+
+    def _find_reset(self):
+        """Relance la recherche depuis le début dès que le texte change."""
+        self.find_count_label.setText("")
+        self._do_find(forward=True, reset=True)
+
+    def _find_next(self):
+        self._do_find(forward=True)
+
+    def _find_prev(self):
+        self._do_find(forward=False)
+
+    def _do_find(self, forward: bool = True, reset: bool = False):
+        """Lance la recherche selon le widget actif."""
+        query = self.find_input.text().strip()
+        if not query:
+            self._clear_highlights()
+            self.find_count_label.setText("")
+            return
+
+        current = self.preview_stack.currentWidget()
+
+        # --- QWebEngineView (HTML, EPUB) ---
+        if self.html_preview and current is self.html_preview:
+            from PySide6.QtWebEngineCore import QWebEnginePage
+            flags = QWebEnginePage.FindFlag(0)
+            if not forward:
+                flags = QWebEnginePage.FindBackward
+            self.html_preview.page().findText(
+                query, flags,
+                lambda found: self.find_count_label.setText(
+                    self.t("find_found") if found else self.t("find_not_found")
+                    if "find_found" in self.translations.get(self.current_language, {})
+                    else ("Trouvé" if found else "Introuvable")
+                )
+            )
+            return
+
+        # --- QTextEdit (TXT, MD, code, HTML fallback) ---
+        if current is self.text_preview:
+            self._highlight_in_text_preview(query, forward, reset)
+
+    def _highlight_in_text_preview(self, query: str, forward: bool, reset: bool):
+        """Surligne toutes les occurrences dans QTextEdit et navigue entre elles."""
+        from styles import THEMES
+        t = THEMES.get(self.current_theme, THEMES["light"])
+        accent = t["accent"]
+
+        doc = self.text_preview.document()
+        text = doc.toPlainText()
+        query_lower = query.lower()
+        text_lower = text.lower()
+
+        # Trouver toutes les positions
+        positions = []
+        start = 0
+        while True:
+            idx = text_lower.find(query_lower, start)
+            if idx == -1:
+                break
+            positions.append(idx)
+            start = idx + 1
+
+        count = len(positions)
+        if count == 0:
+            self._clear_highlights()
+            self.find_count_label.setText(
+                self.t("find_not_found") if "find_not_found" in self.translations.get(self.current_language, {})
+                else "0 résultat"
+            )
+            return
+
+        # Colorer toutes les occurrences
+        extra_selections = []
+        fmt = QTextCharFormat()
+        fmt.setBackground(QColor("#FFD600"))   # jaune vif
+        fmt.setForeground(QColor("#1A1A1A"))   # texte sombre lisible
+
+        for pos in positions:
+            cursor = QTextCursor(doc)
+            cursor.setPosition(pos)
+            cursor.movePosition(QTextCursor.Right, QTextCursor.KeepAnchor, len(query))
+            sel = QTextEdit.ExtraSelection()
+            sel.cursor = cursor
+            sel.format = fmt
+            extra_selections.append(sel)
+
+        self.text_preview.setExtraSelections(extra_selections)
+
+        # Gérer l'index de navigation
+        if not hasattr(self, "_find_index") or reset:
+            self._find_index = 0
+        else:
+            if forward:
+                self._find_index = (self._find_index + 1) % count
+            else:
+                self._find_index = (self._find_index - 1) % count
+
+        # Scroller vers l'occurrence courante
+        cursor = QTextCursor(doc)
+        cursor.setPosition(positions[self._find_index])
+        cursor.movePosition(QTextCursor.Right, QTextCursor.KeepAnchor, len(query))
+        self.text_preview.setTextCursor(cursor)
+        self.text_preview.ensureCursorVisible()
+
+        self.find_count_label.setText(f"{self._find_index + 1} / {count}")
+
+    def _clear_highlights(self):
+        """Efface toutes les surbrillances."""
+        if hasattr(self, "text_preview"):
+            self.text_preview.setExtraSelections([])
+        if self.html_preview:
+            try:
+                self.html_preview.page().findText("")
+            except Exception:
+                pass
 
     def open_real_folder(self, symlink_path: Path):
         try:
@@ -2031,28 +2415,40 @@ class MainWindow(QMainWindow):
             # Mise à jour de la base SQLite
             with sqlite3.connect(config.DB_PATH) as conn:
                 cur = conn.cursor()
-                cur.execute("UPDATE documents SET name = ?, path = ? WHERE path = ?", (
-                    new_name,
-                    rel_new_path,
-                    rel_path
-                ))
-                cur.execute("UPDATE document_metadata SET document_path = ? WHERE document_path = ?", (
-                    rel_new_path,
-                    rel_path
-                ))
+
+                if new_path.is_dir():
+                    # DOSSIER : mettre à jour tous les chemins enfants
+                    old_prefix = rel_path.replace("\\", "/").rstrip("/") + "/"
+                    new_prefix = rel_new_path.replace("\\", "/").rstrip("/") + "/"
+                    cur.execute("SELECT path FROM documents WHERE path LIKE ?",
+                                (old_prefix + "%",))
+                    children = [row[0] for row in cur.fetchall()]
+                    for child_path in children:
+                        child_new = new_prefix + child_path[len(old_prefix):]
+                        cur.execute("UPDATE documents SET path = ? WHERE path = ?",
+                                    (child_new, child_path))
+                        cur.execute("UPDATE document_metadata SET document_path = ? WHERE document_path = ?",
+                                    (child_new, child_path))
+                else:
+                    # FICHIER : mise à jour directe
+                    cur.execute("UPDATE documents SET name = ?, path = ? WHERE path = ?",
+                                (new_name, rel_new_path, rel_path))
+                    cur.execute("UPDATE document_metadata SET document_path = ? WHERE document_path = ?",
+                                (rel_new_path, rel_path))
+
                 conn.commit()
 
-            print(f"[OK] Renommé : {rel_path} â†’ {rel_new_path}")
+            print(f"[OK] Renommé : {rel_path} -> {rel_new_path}")
 
             # Si le fichier renommé est affiché, mettre à jour la prévisualisation
             if self.file_info_label.text().strip() == str(rel_path):
                 self.preview_document(rel_new_path)
 
-            # Réindexation complète du dossier "files"
-            print("[INFO] Réindexation après renommage...")
-            self.reindex_files()  # Appelle ta fonction de réindexation
-            self.load_documents()
-            self.update_file_count()
+            # Différer le rechargement pour éviter la race condition avec les signaux Qt actifs
+            # (reindex_files() retiré : la DB est déjà à jour)
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(100, self.load_documents)
+            QTimer.singleShot(120, self.update_file_count)
 
         except Exception as e:
             QMessageBox.critical(
@@ -2667,16 +3063,17 @@ class MainWindow(QMainWindow):
         scroll_area.setWidgetResizable(True)  # Permet au contenu de se redimensionner
         main_layout.addWidget(scroll_area)
 
-        # Créer un QWebEngineView pour afficher le contenu HTML
-        self.html_preview = QWebEngineView()
-        scroll_area.setWidget(self.html_preview)  # Ajouter le QWebEngineView à la zone de défilement
+        # Créer un QWebEngineView LOCAL pour afficher le contenu HTML
+        # NE PAS utiliser self.html_preview ici — cela écraserait le widget de prévisualisation principal
+        about_web_view = QWebEngineView()
+        scroll_area.setWidget(about_web_view)
 
         # Texte principal de la boîte "à propos"
         cwd = os.getcwd()
         about_html = self.translations.get(self.current_language, {}).get("about_full_text", "").format(cwd=cwd)
 
-        # Charger le contenu HTML dans le QWebEngineView
-        self.html_preview.setHtml(about_html)  # Charger le texte dans le WebEngineView
+        # Charger le contenu HTML dans le QWebEngineView local
+        about_web_view.setHtml(about_html)
 
         # Boutons de langue
         self.add_language_buttons(main_layout)
@@ -2698,14 +3095,14 @@ class MainWindow(QMainWindow):
             if info_path.exists():
                 with open(info_path, 'r', encoding='utf-8') as file:
                     info_html = file.read()
-                    self.html_preview.setHtml(info_html)  # Afficher le contenu de info.html dans la fenêtre "à propos"
+                    about_web_view.setHtml(info_html)  # Afficher le contenu de info.html dans la fenêtre "à propos"
             else:
                 QMessageBox.warning(self, "Erreur", "Impossible de trouver la documentation.")
                 return
 
         except Exception as e:
             print(f"[ERROR] Error loading info.html: {e}")
-            self.html_preview.setHtml(self.t("error_loading_info"))  # Message d'erreur
+            about_web_view.setHtml(self.t("error_loading_info"))  # Message d'erreur
 
         # === Définir la taille minimale de la fenêtre ===
         about_window.setMinimumSize(600, 400)  # Par exemple, 600x400 pixels pour la fenêtre
@@ -3362,6 +3759,8 @@ class MainWindow(QMainWindow):
         self.load_preview_from_path(rel_path)
         self.load_metadata(rel_path)
         self.toggle_metadata_button.setEnabled(True)
+        # Surlignage automatique du terme de recherche en cours
+        self._schedule_search_highlight()
     
     # Navigateur de dossiers 
     def _show_folder_browser(self, abs_path):
@@ -4369,15 +4768,27 @@ class MainWindow(QMainWindow):
         input_row.addWidget(self.meta_tag_add_button)
         input_row.addStretch()
 
+        # Scroll area pour les tags — évite la zone étriquée quand il y en a beaucoup
+        self.meta_tags_scroll = QScrollArea()
+        self.meta_tags_scroll.setWidgetResizable(True)
+        self.meta_tags_scroll.setWidget(self.meta_tags_display)
+        self.meta_tags_scroll.setMinimumHeight(72)
+        self.meta_tags_scroll.setMaximumHeight(140)
+        self.meta_tags_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.meta_tags_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.meta_tags_scroll.setFrameShape(QFrame.NoFrame)
+        self.meta_tags_scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+
         self.meta_tags_container = QWidget()
         container_layout = QVBoxLayout(self.meta_tags_container)
-        container_layout.setContentsMargins(0, 0, 0, 0)
-        container_layout.setSpacing(4)
-        container_layout.addWidget(self.meta_tags_display)
+        container_layout.setContentsMargins(0, 0, 0, 4)
+        container_layout.setSpacing(6)
+        container_layout.addWidget(self.meta_tags_scroll)
         container_layout.addLayout(input_row)
 
         self.label_tags = QLabel(self.t("label_tags"))
-        self.metadata_layout.addWidget(self.label_tags, 1, 0)
+        self.label_tags.setAlignment(Qt.AlignTop)
+        self.metadata_layout.addWidget(self.label_tags, 1, 0, Qt.AlignTop)
         self.metadata_layout.addWidget(self.meta_tags_container, 1, 1)
 
         # Ajout de l'icône de flèche QtAwesome
@@ -4464,7 +4875,7 @@ class MainWindow(QMainWindow):
 
         tag_widget.setMinimumWidth(initial_width)
         tag_widget.setMaximumWidth(initial_width)
-        tag_widget.setFixedHeight(tag_widget.sizeHint().height())
+        tag_widget.setFixedHeight(max(tag_widget.sizeHint().height(), 28))
         tag_widget.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
         def enterEvent(event):

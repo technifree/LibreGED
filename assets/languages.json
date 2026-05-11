@@ -214,7 +214,12 @@
     "theme_arctic": "Arctique",
     "theme_slate": "Ardoise",
     "theme_midnight": "Minuit",
-    "theme_sepia": "Sépia"
+    "theme_sepia": "Sépia",
+    "find_placeholder": "Rechercher...",
+    "find_prev": "Précédent",
+    "find_next": "Suivant",
+    "find_found": "Trouvé",
+    "find_not_found": "Introuvable"
   },
   "en": {
     "about_title": "About LibreGED",
@@ -431,7 +436,12 @@
     "theme_arctic": "Arctic",
     "theme_slate": "Slate",
     "theme_midnight": "Midnight",
-    "theme_sepia": "Sepia"
+    "theme_sepia": "Sepia",
+    "find_placeholder": "Search...",
+    "find_prev": "Previous",
+    "find_next": "Next",
+    "find_found": "Found",
+    "find_not_found": "Not found"
   },
   "de": {
     "about_title": "Über LibreGED",
@@ -648,7 +658,12 @@
     "theme_arctic": "Arktis",
     "theme_slate": "Schiefer",
     "theme_midnight": "Mitternacht",
-    "theme_sepia": "Sepia"
+    "theme_sepia": "Sepia",
+    "find_placeholder": "Suchen...",
+    "find_prev": "Vorherige",
+    "find_next": "Nächste",
+    "find_found": "Gefunden",
+    "find_not_found": "Nicht gefunden"
   },
   "it": {
     "about_title": "Informazioni su LibreGED",
@@ -865,7 +880,12 @@
     "theme_arctic": "Artico",
     "theme_slate": "Ardesia",
     "theme_midnight": "Mezzanotte",
-    "theme_sepia": "Seppia"
+    "theme_sepia": "Seppia",
+    "find_placeholder": "Cerca...",
+    "find_prev": "Precedente",
+    "find_next": "Successivo",
+    "find_found": "Trovato",
+    "find_not_found": "Non trovato"
   },
   "es": {
     "about_title": "Acerca de LibreGED",
@@ -1082,7 +1102,12 @@
     "theme_arctic": "Ártico",
     "theme_slate": "Pizarra",
     "theme_midnight": "Medianoche",
-    "theme_sepia": "Sepia"
+    "theme_sepia": "Sepia",
+    "find_placeholder": "Buscar...",
+    "find_prev": "Anterior",
+    "find_next": "Siguiente",
+    "find_found": "Encontrado",
+    "find_not_found": "No encontrado"
   },
   "nl": {
     "about_title": "Over LibreGED",
@@ -1299,7 +1324,12 @@
     "theme_arctic": "Arctisch",
     "theme_slate": "Leisteen",
     "theme_midnight": "Middernacht",
-    "theme_sepia": "Sepia"
+    "theme_sepia": "Sepia",
+    "find_placeholder": "Zoeken...",
+    "find_prev": "Vorige",
+    "find_next": "Volgende",
+    "find_found": "Gevonden",
+    "find_not_found": "Niet gevonden"
   },
   "pt": {
     "about_title": "Sobre o LibreGED",
@@ -1516,7 +1546,12 @@
     "theme_arctic": "Ártico",
     "theme_slate": "Ardósia",
     "theme_midnight": "Meia-noite",
-    "theme_sepia": "Sépia"
+    "theme_sepia": "Sépia",
+    "find_placeholder": "Pesquisar...",
+    "find_prev": "Anterior",
+    "find_next": "Seguinte",
+    "find_found": "Encontrado",
+    "find_not_found": "Não encontrado"
   },
   "pl": {
     "about_title": "O LibreGED",
@@ -1733,7 +1768,12 @@
     "theme_arctic": "Arktyczny",
     "theme_slate": "Łupek",
     "theme_midnight": "Północ",
-    "theme_sepia": "Sepia"
+    "theme_sepia": "Sepia",
+    "find_placeholder": "Szukaj...",
+    "find_prev": "Poprzedni",
+    "find_next": "Następny",
+    "find_found": "Znaleziono",
+    "find_not_found": "Nie znaleziono"
   },
   "sw": {
     "about_title": "Om LibreGED",
@@ -1950,7 +1990,12 @@
     "theme_arctic": "Arktisk",
     "theme_slate": "Skiffer",
     "theme_midnight": "Midnatt",
-    "theme_sepia": "Sepia"
+    "theme_sepia": "Sepia",
+    "find_placeholder": "Sök...",
+    "find_prev": "Föregående",
+    "find_next": "Nästa",
+    "find_found": "Hittad",
+    "find_not_found": "Hittades inte"
   },
   "dk": {
     "about_title": "Om LibreGED",
@@ -2167,7 +2212,12 @@
     "theme_arctic": "Arktisk",
     "theme_slate": "Skifer",
     "theme_midnight": "Midnat",
-    "theme_sepia": "Sepia"
+    "theme_sepia": "Sepia",
+    "find_placeholder": "Søg...",
+    "find_prev": "Forrige",
+    "find_next": "Næste",
+    "find_found": "Fundet",
+    "find_not_found": "Ikke fundet"
   },
   "fi": {
     "about_title": "Tietoja LibreGEDistä",
@@ -2384,7 +2434,12 @@
     "theme_arctic": "Arktinen",
     "theme_slate": "Liuskekivi",
     "theme_midnight": "Keskiyö",
-    "theme_sepia": "Seepia"
+    "theme_sepia": "Seepia",
+    "find_placeholder": "Hae...",
+    "find_prev": "Edellinen",
+    "find_next": "Seuraava",
+    "find_found": "Löytyi",
+    "find_not_found": "Ei löytynyt"
   },
   "gr": {
     "about_title": "Σχετικά με το LibreGED",
@@ -2601,7 +2656,12 @@
     "theme_arctic": "Αρκτική",
     "theme_slate": "Σχιστόλιθος",
     "theme_midnight": "Μεσάνυχτα",
-    "theme_sepia": "Σέπια"
+    "theme_sepia": "Σέπια",
+    "find_placeholder": "Αναζήτηση...",
+    "find_prev": "Προηγούμενο",
+    "find_next": "Επόμενο",
+    "find_found": "Βρέθηκε",
+    "find_not_found": "Δεν βρέθηκε"
   },
   "cz": {
     "about_title": "O aplikaci LibreGED",
@@ -2818,6 +2878,11 @@
     "theme_arctic": "Arktický",
     "theme_slate": "Břidlice",
     "theme_midnight": "Půlnoc",
-    "theme_sepia": "Sépia"
+    "theme_sepia": "Sépia",
+    "find_placeholder": "Hledat...",
+    "find_prev": "Předchozí",
+    "find_next": "Další",
+    "find_found": "Nalezeno",
+    "find_not_found": "Nenalezeno"
   }
 }

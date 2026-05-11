@@ -600,17 +600,18 @@ def get_tag_widget_style(theme: str = "light") -> str:
     t = _t(theme)
     return f"""
     QFrame {{
-        background-color: {t['tag_bg']}; border-radius: 12px;
-        padding: 2px 8px; margin: 3px;
+        background-color: {t['tag_bg']}; border-radius: 14px;
+        padding: 4px 10px; margin: 3px;
     }}
     QLabel {{
-        color: white; font-size: 11px; font-weight: 600;
-        padding-left: 2px; padding-right: 4px; background: transparent;
+        color: white; font-size: 12px; font-weight: 600;
+        padding-left: 2px; padding-right: 6px; background: transparent;
+        min-height: 20px;
     }}
     QPushButton#tagRemoveButton {{
-        background-color: transparent; color: rgba(255,255,255,0.7);
-        font-weight: bold; font-size: 13px;
-        border: none; padding-left: 4px;
+        background-color: transparent; color: rgba(255,255,255,0.8);
+        font-weight: bold; font-size: 14px;
+        border: none; padding-left: 4px; min-height: 20px;
     }}
     QPushButton#tagRemoveButton:hover {{ color: #FF5252; }}
     """

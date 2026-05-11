@@ -1,5 +1,15 @@
 import sys
 import os
+import warnings
+
+# ── Supprimer les warnings bénins des bibliothèques tierces ───────────────────
+warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+# Rediriger les erreurs MuPDF vers /dev/null (colorspace ICC non standard, etc.)
+import fitz
+fitz.TOOLS.mupdf_warnings()        # vide le buffer au démarrage
+fitz.TOOLS.reset_mupdf_warnings()
 
 from PySide6.QtWidgets import QApplication, QStyleFactory
 from PySide6.QtGui     import QIcon
@@ -22,13 +32,13 @@ def main():
     # Initialisation de la base (scan)
     scan_and_insert_files(files_dir)
 
-    # Lancement de l’UI
+    # Lancement de l'UI
     app = QApplication(sys.argv)
     favicon = config.ASSETS_DIR / "icons" / "favicon.ico"
     if favicon.exists():
         app.setWindowIcon(QIcon(str(favicon)))
     QApplication.setStyle(QStyleFactory.create("Fusion"))
-    
+
     window = MainWindow()
     window.show()
     sys.exit(app.exec())

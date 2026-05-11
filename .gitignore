@@ -8,3 +8,4 @@ __pycache__/
 .env
 ged.db
 LibreGED-windows.zip
+MODE_OPERATOIRE.md
