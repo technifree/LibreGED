@@ -8,8 +8,16 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 # Rediriger les erreurs MuPDF vers /dev/null (colorspace ICC non standard, etc.)
 import fitz
-fitz.TOOLS.mupdf_warnings()        # vide le buffer au démarrage
+fitz.TOOLS.mupdf_warnings()
 fitz.TOOLS.reset_mupdf_warnings()
+
+# ── Fix QtWebEngine sur Windows ───────────────────────────────────────────────
+# Désactive le sandbox et le GPU qui causent des processus zombies sur
+# certaines configurations Windows (crash HTML/DOCX/ODT + processus bloqués)
+if sys.platform == "win32":
+    os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS",
+                          "--no-sandbox --disable-gpu --disable-gpu-compositing")
+    os.environ.setdefault("QTWEBENGINE_DISABLE_SANDBOX", "1")
 
 from PySide6.QtWidgets import QApplication, QStyleFactory
 from PySide6.QtGui     import QIcon

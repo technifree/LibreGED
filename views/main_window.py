@@ -1,4 +1,4 @@
-# LibreGED v2.8.1 - 11/05/2026
+# LibreGED v2.8.2 - 12/05/2026
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QPushButton, QLabel, QLineEdit, QTextEdit,
@@ -240,6 +240,52 @@ def matches_content(file_path, query, translate):
             try:
                 content = odf_utils.extract_text_from_pptx(file_path)
                 return query in content.lower()
+            except Exception:
+                return False
+
+        elif ext in (".mhtml", ".mht"):
+            try:
+                # MHTML est un format texte — extraction brute du contenu
+                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                    raw = f.read()
+                from bs4 import BeautifulSoup
+                soup = BeautifulSoup(raw, "html.parser")
+                return query in soup.get_text().lower()
+            except Exception:
+                return False
+
+        elif ext == ".eml":
+            try:
+                import email as email_lib
+                from email import policy
+                with open(file_path, "rb") as f:
+                    msg = email_lib.message_from_binary_file(f, policy=policy.default)
+                # Chercher dans les en-têtes
+                headers = " ".join([
+                    str(msg.get("Subject", "")),
+                    str(msg.get("From", "")),
+                    str(msg.get("To", "")),
+                ]).lower()
+                if query in headers:
+                    return True
+                # Chercher dans le corps
+                if msg.is_multipart():
+                    for part in msg.walk():
+                        ct = part.get_content_type()
+                        if ct in ("text/plain", "text/html"):
+                            try:
+                                text = part.get_content().lower()
+                                if query in text:
+                                    return True
+                            except Exception:
+                                pass
+                else:
+                    try:
+                        text = msg.get_content().lower()
+                        if query in text:
+                            return True
+                    except Exception:
+                        pass
             except Exception:
                 return False
 
@@ -997,9 +1043,15 @@ class MainWindow(QMainWindow):
 
         self.preview_layout.addWidget(self.search_bar_widget)
 
-        # Raccourci Ctrl+F
+        # Raccourcis recherche
         self._find_shortcut = QShortcut(QKeySequence("Ctrl+F"), self)
         self._find_shortcut.activated.connect(self._toggle_search_bar)
+
+        self._find_f3 = QShortcut(QKeySequence("F3"), self)
+        self._find_f3.activated.connect(self._find_next)
+
+        self._find_shift_f3 = QShortcut(QKeySequence("Shift+F3"), self)
+        self._find_shift_f3.activated.connect(self._find_prev)
 
         # Échap pour fermer
         self._find_esc = QShortcut(QKeySequence("Escape"), self.find_input)
@@ -1337,7 +1389,7 @@ class MainWindow(QMainWindow):
         self.setWindowIcon(flag_icon)
 
         # 2) on assemble le texte
-        title = "LibreGED v.2.8.1"
+        title = "LibreGED v.2.8.2"
         if filename:
             title += f" – {filename}"
         self.setWindowTitle(title)
@@ -1663,9 +1715,8 @@ class MainWindow(QMainWindow):
         if current is self.text_preview:
             self._highlight_term_in_text_preview(term)
 
-        # QWebEngineView (HTML, DOCX, ODT, EPUB...)
+        # QWebEngineView (HTML, DOCX, ODT, EPUB, MHTML, EML...)
         elif self.html_preview and current is self.html_preview:
-            # QTimer : setHtml() déclenche loadFinished avant qu'on puisse s'y connecter
             from PySide6.QtCore import QTimer
             QTimer.singleShot(250, lambda t=term: self._highlight_term_in_webengine(t))
 
@@ -2415,40 +2466,28 @@ class MainWindow(QMainWindow):
             # Mise à jour de la base SQLite
             with sqlite3.connect(config.DB_PATH) as conn:
                 cur = conn.cursor()
-
-                if new_path.is_dir():
-                    # DOSSIER : mettre à jour tous les chemins enfants
-                    old_prefix = rel_path.replace("\\", "/").rstrip("/") + "/"
-                    new_prefix = rel_new_path.replace("\\", "/").rstrip("/") + "/"
-                    cur.execute("SELECT path FROM documents WHERE path LIKE ?",
-                                (old_prefix + "%",))
-                    children = [row[0] for row in cur.fetchall()]
-                    for child_path in children:
-                        child_new = new_prefix + child_path[len(old_prefix):]
-                        cur.execute("UPDATE documents SET path = ? WHERE path = ?",
-                                    (child_new, child_path))
-                        cur.execute("UPDATE document_metadata SET document_path = ? WHERE document_path = ?",
-                                    (child_new, child_path))
-                else:
-                    # FICHIER : mise à jour directe
-                    cur.execute("UPDATE documents SET name = ?, path = ? WHERE path = ?",
-                                (new_name, rel_new_path, rel_path))
-                    cur.execute("UPDATE document_metadata SET document_path = ? WHERE document_path = ?",
-                                (rel_new_path, rel_path))
-
+                cur.execute("UPDATE documents SET name = ?, path = ? WHERE path = ?", (
+                    new_name,
+                    rel_new_path,
+                    rel_path
+                ))
+                cur.execute("UPDATE document_metadata SET document_path = ? WHERE document_path = ?", (
+                    rel_new_path,
+                    rel_path
+                ))
                 conn.commit()
 
-            print(f"[OK] Renommé : {rel_path} -> {rel_new_path}")
+            print(f"[OK] Renommé : {rel_path} â†’ {rel_new_path}")
 
             # Si le fichier renommé est affiché, mettre à jour la prévisualisation
             if self.file_info_label.text().strip() == str(rel_path):
                 self.preview_document(rel_new_path)
 
-            # Différer le rechargement pour éviter la race condition avec les signaux Qt actifs
-            # (reindex_files() retiré : la DB est déjà à jour)
-            from PySide6.QtCore import QTimer
-            QTimer.singleShot(100, self.load_documents)
-            QTimer.singleShot(120, self.update_file_count)
+            # Réindexation complète du dossier "files"
+            print("[INFO] Réindexation après renommage...")
+            self.reindex_files()  # Appelle ta fonction de réindexation
+            self.load_documents()
+            self.update_file_count()
 
         except Exception as e:
             QMessageBox.critical(
@@ -4116,10 +4155,18 @@ class MainWindow(QMainWindow):
                 html = odf_utils.odp_to_html(doc_path)
                 self.show_html_preview(html)
             
+            # === MHTML ===
+            elif ext in (".mhtml", ".mht"):
+                self.show_mhtml_preview(doc_path)
+
+            # === EML ===
+            elif ext == ".eml":
+                self.show_eml_preview(doc_path)
+
             # === XML ===
             elif ext == ".xml":
                 self.show_xml_preview(rel_path)
-            
+
             # === SVG ===
             elif ext == ".svg":
                 self.show_svg_preview(rel_path)
@@ -4129,6 +4176,70 @@ class MainWindow(QMainWindow):
 
         except Exception as e:
             QMessageBox.critical(self, self.t("error_reading_file"), str(e))
+
+    def show_mhtml_preview(self, doc_path):
+        """Prévisualise un fichier MHTML via QWebEngineView (support natif)."""
+        if not WEB_ENGINE_AVAILABLE:
+            self.show_text_preview(self.t("error_webengine_unavailable"))
+            return
+        from PySide6.QtCore import QUrl
+        url = QUrl.fromLocalFile(str(doc_path))
+        self.html_preview.setUrl(url)
+        self.preview_stack.setCurrentWidget(self.html_preview)
+        self.clear_nav_bar()
+
+    def show_eml_preview(self, doc_path):
+        """Prévisualise un fichier EML en extrayant le corps HTML ou texte."""
+        import email as email_lib
+        from email import policy
+
+        try:
+            with open(str(doc_path), "rb") as f:
+                msg = email_lib.message_from_binary_file(f, policy=policy.default)
+
+            # Métadonnées
+            subject = msg.get("Subject", "")
+            from_addr = msg.get("From", "")
+            to_addr = msg.get("To", "")
+            date = msg.get("Date", "")
+
+            header_html = f"""
+            <div style="background:#f5f5f5;padding:12px 16px;border-bottom:1px solid #ddd;
+                        font-family:sans-serif;font-size:13px;color:#333;">
+                <b>De :</b> {from_addr}<br>
+                <b>À :</b> {to_addr}<br>
+                <b>Sujet :</b> {subject}<br>
+                <b>Date :</b> {date}
+            </div>
+            """
+
+            # Corps : HTML en priorité, sinon texte plain
+            body_html = ""
+            if msg.is_multipart():
+                for part in msg.walk():
+                    ct = part.get_content_type()
+                    if ct == "text/html":
+                        body_html = part.get_content()
+                        break
+                if not body_html:
+                    for part in msg.walk():
+                        if part.get_content_type() == "text/plain":
+                            text = part.get_content()
+                            body_html = f"<pre style='font-family:sans-serif;padding:16px'>{text}</pre>"
+                            break
+            else:
+                ct = msg.get_content_type()
+                if ct == "text/html":
+                    body_html = msg.get_content()
+                else:
+                    text = msg.get_content()
+                    body_html = f"<pre style='font-family:sans-serif;padding:16px'>{text}</pre>"
+
+            full_html = f"<html><body>{header_html}{body_html}</body></html>"
+            self.show_html_preview(full_html)
+
+        except Exception as e:
+            self.show_text_preview(f"Erreur lecture EML : {e}")
 
     def show_html_preview(self, html):
         from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -4768,27 +4879,15 @@ class MainWindow(QMainWindow):
         input_row.addWidget(self.meta_tag_add_button)
         input_row.addStretch()
 
-        # Scroll area pour les tags — évite la zone étriquée quand il y en a beaucoup
-        self.meta_tags_scroll = QScrollArea()
-        self.meta_tags_scroll.setWidgetResizable(True)
-        self.meta_tags_scroll.setWidget(self.meta_tags_display)
-        self.meta_tags_scroll.setMinimumHeight(72)
-        self.meta_tags_scroll.setMaximumHeight(140)
-        self.meta_tags_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.meta_tags_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.meta_tags_scroll.setFrameShape(QFrame.NoFrame)
-        self.meta_tags_scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-
         self.meta_tags_container = QWidget()
         container_layout = QVBoxLayout(self.meta_tags_container)
-        container_layout.setContentsMargins(0, 0, 0, 4)
-        container_layout.setSpacing(6)
-        container_layout.addWidget(self.meta_tags_scroll)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(4)
+        container_layout.addWidget(self.meta_tags_display)
         container_layout.addLayout(input_row)
 
         self.label_tags = QLabel(self.t("label_tags"))
-        self.label_tags.setAlignment(Qt.AlignTop)
-        self.metadata_layout.addWidget(self.label_tags, 1, 0, Qt.AlignTop)
+        self.metadata_layout.addWidget(self.label_tags, 1, 0)
         self.metadata_layout.addWidget(self.meta_tags_container, 1, 1)
 
         # Ajout de l'icône de flèche QtAwesome
@@ -4875,7 +4974,7 @@ class MainWindow(QMainWindow):
 
         tag_widget.setMinimumWidth(initial_width)
         tag_widget.setMaximumWidth(initial_width)
-        tag_widget.setFixedHeight(max(tag_widget.sizeHint().height(), 28))
+        tag_widget.setFixedHeight(tag_widget.sizeHint().height())
         tag_widget.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
         def enterEvent(event):
