@@ -6,14 +6,14 @@
 
 **Gestionnaire de documents personnel — simple, portable et puissant**
 
-[![Version](https://img.shields.io/badge/version-2.8.1-blue?style=flat-square)](https://github.com/technifree/LibreGED/releases)
+[![Version](https://img.shields.io/badge/version-2.8.2-blue?style=flat-square)](https://github.com/technifree/LibreGED/releases)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-lightgrey?style=flat-square)](https://github.com/technifree/LibreGED/releases)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-yellow?style=flat-square&logo=python)](https://python.org)
 [![PySide6](https://img.shields.io/badge/PySide6-6.9-green?style=flat-square)](https://doc.qt.io/qtforpython/)
 [![License](https://img.shields.io/badge/license-MIT-orange?style=flat-square)](LICENSE)
 [![Website](https://img.shields.io/badge/website-technifree.com-blueviolet?style=flat-square)](https://technifree.com)
 
-*Mise à jour : 11 mai 2026*
+*Mise à jour : 12 mai 2026
 
 [Site web](https://technifree.com) &nbsp;·&nbsp; [Télécharger](https://github.com/technifree/LibreGED/releases) &nbsp;·&nbsp; [Signaler un bug](https://github.com/technifree/LibreGED/issues)
 
