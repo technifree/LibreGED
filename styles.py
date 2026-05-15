@@ -242,16 +242,16 @@ QTreeWidget {{
     selection-background-color: transparent;
 }}
 QTreeWidget::item {{
-    padding: 5px 8px;
-    min-height: 24px;
+    padding: 5px 8px 5px 22px;
+    min-height: 26px;
     border-radius: 6px;
     margin: 1px 4px;
 }}
 QTreeWidget::item:hover {{
-    background-color: {t['hover']};
+    background-color: transparent;
 }}
 QTreeWidget::item:selected {{
-    background-color: {t['selected']};
+    background-color: transparent;
     color: {t['text']};
     font-weight: 600;
 }}
@@ -319,9 +319,7 @@ QLabel {{
     background-color: transparent;
 }}
 QSplitter::handle {{
-    background-color: {t['border']};
-    width: 1px;
-    height: 1px;
+    background-color: transparent;
 }}
 QScrollArea {{
     background-color: transparent;
@@ -396,13 +394,14 @@ def get_full_stylesheet(theme: str) -> str:
 
 
 def apply_common_styles(window):
-    for btn in [
+    base_buttons = [
         window.reindex_button, window.import_button, window.reset_button,
         window.info_button, window.theme_button, window.search_button,
         window.zoom_in_button, window.zoom_out_button,
         window.prev_page_button, window.next_page_button,
-        window.meta_tag_add_button,
-    ]:
+    ]
+    # meta_tag_add_button supprimé (remplacé par TagPickerDialog)
+    for btn in base_buttons:
         btn.setStyleSheet(get_uniform_button_style(window.current_theme))
         btn.setFixedSize(40, 40)
     window.tree.setStyleSheet(_build_main_stylesheet(window.current_theme))

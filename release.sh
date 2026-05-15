@@ -11,7 +11,7 @@ SKIP_MACOS="${SKIP_MACOS:-0}"
 # ── Vérifications ─────────────────────────────────────────────────────────────
 if [ -z "$VERSION" ]; then
     echo "Usage : ./release.sh vX.Y.Z \"Description\""
-    echo "Exemple : ./release.sh v2.8.1 \"Fix crash renommage, Ctrl+F\""
+    echo "Exemple : ./release.sh v2.8.2 \"Fix crash Windows, EML, MHTML\""
     exit 1
 fi
 
@@ -33,45 +33,57 @@ echo "  Release LibreGED $VERSION"
 echo "══════════════════════════════════════════════════"
 echo ""
 
-# ── Étape 1 : Commit + push EN PREMIER ────────────────────────────────────────
-# IMPORTANT : pousser avant les builds GitHub Actions,
-# sinon les runners compilent l'ancienne version du code.
-echo "[1/6] Commit et push du code source..."
+# ── Étape 1 : Mise à jour du README ───────────────────────────────────────────
+echo "[1/7] Mise à jour du README..."
+TODAY=$(date +'%d %B %Y' | LC_ALL=fr_FR.UTF-8 date -f - +'%d %B %Y' 2>/dev/null || date +'%d/%m/%Y')
+VERSION_NUM="${VERSION#v}"   # retire le "v" → 2.8.2
+
+# Remplacer le badge de version (tous les formats possibles)
+sed -i "s/version-[0-9]\+\.[0-9]\+\.[0-9]\+/version-${VERSION_NUM}/g" README.md
+
+# Remplacer la date (format "DD mois YYYY" ou "DD/MM/YYYY")
+sed -i "s/Mise à jour :.*$/Mise à jour : $(date +'%d %B %Y')/" README.md
+
+git add README.md
+echo "      OK — README mis à jour (v${VERSION_NUM}, $(date +'%d %B %Y'))"
+
+# ── Étape 2 : Commit + push EN PREMIER ────────────────────────────────────────
+echo "[2/7] Commit et push du code source..."
 git add .
 git commit -m "$VERSION — $NOTES" 2>/dev/null || echo "      (rien à committer)"
 git pull --rebase origin master --quiet
 git push --quiet
 echo "      OK — code source à jour sur GitHub"
 
-# ── Étape 2 : Build Linux ──────────────────────────────────────────────────────
-echo "[2/6] Build Linux (Docker Ubuntu 22.04)..."
+# ── Étape 3 : Build Linux ──────────────────────────────────────────────────────
+echo "[3/7] Build Linux (Docker Ubuntu 22.04)..."
 ./build_linux.sh
 echo "      OK"
 
-# ── Étape 3 : Build Windows ───────────────────────────────────────────────────
-echo "[3/6] Build Windows (GitHub Actions)..."
+# ── Étape 4 : Build Windows ───────────────────────────────────────────────────
+echo "[4/7] Build Windows (GitHub Actions)..."
 ./build_windows.sh master
 echo "      OK"
 
-# ── Étape 4 : Build macOS ─────────────────────────────────────────────────────
+# ── Étape 5 : Build macOS ─────────────────────────────────────────────────────
 if [ "$SKIP_MACOS" = "1" ]; then
-    echo "[4/6] Build macOS ignoré (SKIP_MACOS=1)"
+    echo "[5/7] Build macOS ignoré (SKIP_MACOS=1)"
 else
-    echo "[4/6] Build macOS (GitHub Actions)..."
+    echo "[5/7] Build macOS (GitHub Actions)..."
     ./build_macos.sh master
     echo "      OK"
 fi
 
-# ── Étape 5 : Archives ────────────────────────────────────────────────────────
-echo "[5/6] Création des archives..."
+# ── Étape 6 : Archives ────────────────────────────────────────────────────────
+echo "[6/7] Création des archives..."
 rm -f LibreGED-linux.tar.gz
 cd dist && tar -czf ../LibreGED-linux.tar.gz LibreGED/ && cd ..
 echo "      Linux  : LibreGED-linux.tar.gz  ($(du -sh LibreGED-linux.tar.gz | cut -f1))"
 echo "      Windows: LibreGED-windows.zip   ($(du -sh LibreGED-windows.zip | cut -f1))"
 [ -f LibreGED-macos.zip ] && echo "      macOS  : LibreGED-macos.zip    ($(du -sh LibreGED-macos.zip | cut -f1))"
 
-# ── Étape 6 : Release GitHub ──────────────────────────────────────────────────
-echo "[6/6] Publication de la release GitHub $VERSION..."
+# ── Étape 7 : Release GitHub ──────────────────────────────────────────────────
+echo "[7/7] Publication de la release GitHub $VERSION..."
 
 ASSETS="LibreGED-linux.tar.gz LibreGED-windows.zip"
 [ -f LibreGED-macos.zip ] && ASSETS="$ASSETS LibreGED-macos.zip"

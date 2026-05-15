@@ -1,8 +1,8 @@
-# LibreGED v2.8.2 - 12/05/2026
+# LibreGED v2.9.0 - 15/05/2026
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QPushButton, QLabel, QLineEdit, QTextEdit,
-    QVBoxLayout, QHBoxLayout, QGridLayout, QFormLayout, QSplitter, QScrollArea,
+    QVBoxLayout, QHBoxLayout, QGridLayout, QFormLayout, QSplitter, QSplitterHandle, QScrollArea,
     QListWidget, QListWidgetItem, QTreeWidget, QTreeWidgetItem, QTreeWidgetItemIterator,
     QMessageBox, QMenu, QToolTip, QSizePolicy, QSpacerItem, QStackedLayout,
     QGraphicsOpacityEffect, QApplication, QStyleFactory, QDialog, QStackedWidget,
@@ -12,7 +12,8 @@ from PySide6.QtWidgets import (
 
 from PySide6.QtCore import (
     Qt, QTimer, QEvent, QUrl, QThread, QPropertyAnimation,
-    QEasingCurve, QParallelAnimationGroup, QSize, QObject, Signal, QMimeData, QPoint
+    QEasingCurve, QParallelAnimationGroup, QSize, QObject, Signal, QMimeData, QPoint,
+    Property
 )
 
 from PySide6.QtGui import (
@@ -82,9 +83,18 @@ def _safe_rel(abs_path, base) -> str | None:
 from views.folder_browser import FolderBrowserWidget
 
 TAG_COLORS = [
-    "#007BFF", "#28a745", "#17a2b8", "#ffc107", "#6f42c1",
-    "#fd7e14", "#20c997", "#6610f2", "#e83e8c", "#343a40"
+    "#007BFF", "#28a745", "#17a2b8", "#e67e22",
+    "#6f42c1", "#fd7e14", "#20c997", "#e83e8c",
 ]
+
+def tag_color(tag: str) -> str:
+    """
+    Retourne une couleur déterministe pour un tag donné.
+    Utilise sum(ord) au lieu de hash() — stable entre sessions
+    (hash() dépend de PYTHONHASHSEED qui change à chaque lancement).
+    """
+    stable_key = sum(ord(c) for c in tag)
+    return TAG_COLORS[stable_key % len(TAG_COLORS)]
 
 def has_symlink_privileges():
     """Vérifie si l'utilisateur a les droits pour créer un lien symbolique (utile sous Windows)."""
@@ -384,15 +394,21 @@ def convert_docx_to_html(path):
         messages = result.messages  
     return html
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Splitter avec bouton accordéon sur la poignée
+# ──────────────────────────────────────────────────────────────────────────────
+
 class DraggableTreeWidget(QTreeWidget):
     """
     QTreeWidget avec drag and drop interne pour reorganiser fichiers/dossiers.
     - Glisser un item vers un dossier cible = deplacement sur disque + reindexation
     - Drop sur la zone vide = deplacement a la racine de FILES_DIR
     - Signal item_moved(src_rel, dst_rel) emis apres chaque deplacement
+    - Accepte aussi les drops externes depuis l'explorateur (Copier / Déplacer)
     """
 
-    item_moved = Signal(str, str)
+    item_moved    = Signal(str, str)
+    external_drop = Signal(list, str, str)  # (paths, dest_rel, mode:"copy"|"move")
     _DRAG_THRESHOLD = 6
 
     def __init__(self, files_dir, parent=None):
@@ -456,11 +472,16 @@ class DraggableTreeWidget(QTreeWidget):
     def dragEnterEvent(self, event):
         if event.mimeData().hasFormat('application/x-libreged-paths'):
             event.acceptProposedAction()
+        elif event.mimeData().hasUrls():
+            # Drop externe depuis l'explorateur de fichiers
+            event.acceptProposedAction()
         else:
             event.ignore()
 
     def dragMoveEvent(self, event):
-        if not event.mimeData().hasFormat('application/x-libreged-paths'):
+        has_internal = event.mimeData().hasFormat('application/x-libreged-paths')
+        has_external = event.mimeData().hasUrls()
+        if not (has_internal or has_external):
             event.ignore()
             return
         target_item = self.itemAt(event.pos())
@@ -477,17 +498,11 @@ class DraggableTreeWidget(QTreeWidget):
                 self._highlight_drop_target(parent)
                 event.acceptProposedAction()
 
-    def dragLeaveEvent(self, event):
-        self._highlight_drop_target(None)
-        super().dragLeaveEvent(event)
-
     def dropEvent(self, event):
         self._highlight_drop_target(None)
-        if not event.mimeData().hasFormat('application/x-libreged-paths'):
-            event.ignore()
-            return
-        raw = event.mimeData().data('application/x-libreged-paths').data()
-        src_rels = raw.decode('utf-8').strip().splitlines()
+        mime = event.mimeData()
+
+        # --- Résoudre la destination ---
         target_item = self.itemAt(event.pos())
         if target_item is None:
             dest_rel = ''
@@ -498,36 +513,79 @@ class DraggableTreeWidget(QTreeWidget):
             else:
                 parent = target_item.parent()
                 dest_rel = parent.data(0, Qt.ItemDataRole.UserRole) if parent else ''
-        import shutil
-        errors = []
-        moved  = []
-        for src_rel in src_rels:
-            src_path = self._files_dir / src_rel
-            dest_dir = self._files_dir / dest_rel if dest_rel else self._files_dir
-            try:
-                dest_dir.resolve().relative_to(src_path.resolve())
-                continue
-            except ValueError:
-                pass
-            if src_path.parent.resolve() == dest_dir.resolve():
-                continue
-            dest_path = dest_dir / src_path.name
-            if dest_path.exists():
-                errors.append(src_path.name + ' : existe deja dans la destination')
-                continue
-            try:
-                shutil.move(str(src_path), str(dest_path))
-                moved.append((src_rel, str(dest_path.relative_to(self._files_dir))))
-            except Exception as e:
-                errors.append(src_path.name + ' : ' + str(e))
-        if moved:
-            for src_rel, new_rel in moved:
-                self.item_moved.emit(src_rel, new_rel)
-        if errors:
-            from PySide6.QtWidgets import QMessageBox
-            QMessageBox.warning(self, 'Erreur de deplacement',
-                'Certains elements ne peuvent pas etre deplaces :\n' + '\n'.join(errors))
-        event.acceptProposedAction()
+
+        # --- Drop INTERNE (réorganisation) ---
+        if mime.hasFormat('application/x-libreged-paths'):
+            raw = mime.data('application/x-libreged-paths').data()
+            src_rels = raw.decode('utf-8').strip().splitlines()
+            import shutil
+            errors = []
+            moved  = []
+            for src_rel in src_rels:
+                src_path = self._files_dir / src_rel
+                dest_dir = self._files_dir / dest_rel if dest_rel else self._files_dir
+                try:
+                    dest_dir.resolve().relative_to(src_path.resolve())
+                    continue
+                except ValueError:
+                    pass
+                if src_path.parent.resolve() == dest_dir.resolve():
+                    continue
+                dest_path = dest_dir / src_path.name
+                if dest_path.exists():
+                    errors.append(src_path.name + ' : existe deja dans la destination')
+                    continue
+                try:
+                    shutil.move(str(src_path), str(dest_path))
+                    moved.append((src_rel, str(dest_path.relative_to(self._files_dir))))
+                except Exception as e:
+                    errors.append(src_path.name + ' : ' + str(e))
+            if moved:
+                for src_rel, new_rel in moved:
+                    self.item_moved.emit(src_rel, new_rel)
+            if errors:
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.warning(self, 'Erreur de deplacement',
+                    'Certains elements ne peuvent pas etre deplaces :\n' + '\n'.join(errors))
+            event.acceptProposedAction()
+            return
+
+        # --- Drop EXTERNE (depuis l'explorateur) ---
+        if mime.hasUrls():
+            ext_paths = []
+            for url in mime.urls():
+                local = url.toLocalFile()
+                if local and local not in (str(self._files_dir / dest_rel),):
+                    # Exclure les fichiers déjà dans files_dir
+                    from pathlib import Path as _Path
+                    p = _Path(local)
+                    try:
+                        p.relative_to(self._files_dir)
+                        continue   # déjà dedans → drop interne géré autrement
+                    except ValueError:
+                        pass
+                    ext_paths.append(local)
+
+            if ext_paths:
+                from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QComboBox, QHBoxLayout
+                dlg = QDialog(self)
+                dlg.setWindowTitle("Importer des fichiers")
+                lv = QVBoxLayout(dlg)
+                lv.addWidget(QLabel("Choisissez l'action :"))
+                combo = QComboBox()
+                combo.addItems(["Copier", "Déplacer"])
+                lv.addWidget(combo)
+                row = QHBoxLayout()
+                row.addStretch()
+                from PySide6.QtWidgets import QPushButton as _QB
+                b_cancel = _QB("Annuler"); b_cancel.clicked.connect(dlg.reject)
+                b_ok = _QB("OK"); b_ok.clicked.connect(dlg.accept); b_ok.setDefault(True)
+                row.addWidget(b_cancel); row.addWidget(b_ok)
+                lv.addLayout(row)
+                if dlg.exec() == QDialog.Accepted:
+                    mode = "move" if combo.currentText() == "Déplacer" else "copy"
+                    self.external_drop.emit(ext_paths, dest_rel, mode)
+            event.acceptProposedAction()
 
     def _highlight_drop_target(self, item):
         if self._drop_target_item and self._drop_target_item is not item:
@@ -706,6 +764,17 @@ class MainWindow(QMainWindow):
         # Redimensionne la fenêtre à cette taille par défaut
         self.resize(default_width, default_height)
         self.setMinimumSize(600, 400)
+
+        # Restaurer la géométrie de la fenêtre depuis config.json
+        saved_cfg = config.load_config()
+        saved_geom = saved_cfg.get("window_geometry")
+        if saved_geom:
+            try:
+                from PySide6.QtCore import QRect
+                g = saved_geom
+                self.setGeometry(g[0], g[1], g[2], g[3])
+            except Exception:
+                pass
 
         # --- Initialisation du compteur de résultats de recherche ---
         self.search_result_count = 0
@@ -913,8 +982,11 @@ class MainWindow(QMainWindow):
         self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self.show_tree_context_menu)
         self.tree.item_moved.connect(self._on_tree_item_moved)
+        self.tree.external_drop.connect(self._on_tree_external_drop)
         left_layout.addWidget(self.tree)
-        self.tree.setItemDelegate(ScrollingItemDelegate(self.tree))
+        from styles import THEMES
+        _t = THEMES.get(self.current_theme, THEMES["light"])
+        self.tree.setItemDelegate(ScrollingItemDelegate(self.tree, _t["accent"]))
         self.tree._install_drag_filter()  # apres setItemDelegate
 
         # -- Zone de prévisualisation complète (avec sélecteur en haut) --
@@ -1010,7 +1082,6 @@ class MainWindow(QMainWindow):
         self.find_input.setPlaceholderText(self.t("find_placeholder") if "find_placeholder" in self.translations.get(self.current_language, {}) else "Rechercher...")
         self.find_input.setFixedHeight(28)
         self.find_input.setMinimumWidth(200)
-        self.find_input.returnPressed.connect(self._find_next)
         self.find_input.textChanged.connect(self._find_reset)
 
         self.find_prev_btn = QPushButton()
@@ -1052,6 +1123,12 @@ class MainWindow(QMainWindow):
 
         self._find_shift_f3 = QShortcut(QKeySequence("Shift+F3"), self)
         self._find_shift_f3.activated.connect(self._find_prev)
+
+        self._find_alt_f3 = QShortcut(QKeySequence("Alt+F3"), self)
+        self._find_alt_f3.activated.connect(self._find_prev)
+
+        # Enter dans la barre de recherche = occurrence suivante
+        self.find_input.returnPressed.connect(self._find_next)
 
         # Échap pour fermer
         self._find_esc = QShortcut(QKeySequence("Escape"), self.find_input)
@@ -1182,19 +1259,20 @@ class MainWindow(QMainWindow):
         self.setup_metadata_tags_field()
 
         self.meta_comment_field = QTextEdit()
-        self.meta_comment_field.setFixedHeight(40)
+        self.meta_comment_field.setMinimumHeight(52)
+        self.meta_comment_field.setMaximumHeight(100)
         self.meta_version_field = QLineEdit()
         self.meta_updated_field = QLineEdit()
         self.meta_updated_field.setReadOnly(True)
 
-        self.meta_author_field.setMaximumHeight(20)
-        self.meta_version_field.setMaximumHeight(20)
-        self.meta_updated_field.setMaximumHeight(20)
+        self.meta_author_field.setMinimumHeight(26)
+        self.meta_version_field.setMinimumHeight(26)
+        self.meta_updated_field.setMinimumHeight(26)
 
         self.label_author = QLabel(self.t("label_author"))
         self.metadata_layout.addWidget(self.label_author, 0, 0)
         self.metadata_layout.addWidget(self.meta_author_field, 0, 1)
-        self.metadata_layout.addWidget(self.meta_tags_container, 1, 1)  
+        # meta_tags_container déjà ajouté dans setup_metadata_tags_field() (ligne 1, col 0 et 1)
         self.label_comment = QLabel(self.t("label_comment"))
         self.metadata_layout.addWidget(self.label_comment, 2, 0)
         self.metadata_layout.addWidget(self.meta_comment_field, 2, 1)
@@ -1223,15 +1301,43 @@ class MainWindow(QMainWindow):
         self.metadata_form.hide()
 
         # -- Splitter principal --
-        splitter = QSplitter()
-        splitter.addWidget(left_panel)
-        splitter.addWidget(self.preview_container)
-        splitter.setSizes([250, 950])
+        self.splitter = QSplitter(Qt.Horizontal)
+        self.splitter.addWidget(left_panel)
+        self.splitter.addWidget(self.preview_container)
+        self.splitter.setHandleWidth(2)
+        self.splitter.setSizes([250, 950])
+
+        # Restaurer la taille sauvegardée (avec garde-fous)
+        saved_cfg = config.load_config()
+        saved_splitter = saved_cfg.get("splitter_sizes")
+        if (saved_splitter and len(saved_splitter) == 2
+                and 80 <= saved_splitter[0] <= 600
+                and saved_splitter[1] > 100):
+            self.splitter.setSizes(saved_splitter)
 
         container = QWidget()
         layout = QVBoxLayout(container)
-        layout.addWidget(splitter)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.splitter)
         self.setCentralWidget(container)
+
+        # -- Bouton accordéon flottant (enfant du container, à cheval sur le splitter) --
+        self._sidebar_open   = True
+        self._sidebar_saved  = 250
+        self._sidebar_anim   = None
+
+        self._sidebar_btn = QPushButton(container)
+        self._sidebar_btn.setFixedSize(26, 26)
+        self._sidebar_btn.setCursor(Qt.PointingHandCursor)
+        self._sidebar_btn.setToolTip("Réduire / Afficher le panneau")
+        self._sidebar_btn.clicked.connect(self._toggle_sidebar)
+        self._sidebar_btn.raise_()
+        self._update_sidebar_btn_style()
+        self._update_sidebar_btn_icon()
+
+        # Repositionner après que le layout soit effectif
+        QTimer.singleShot(0, self._reposition_sidebar_btn)
+        self.splitter.splitterMoved.connect(lambda *_: self._reposition_sidebar_btn())
 
         # --- Barre de boutons supplémentaires en bas ---
         bottom_buttons_layout = QHBoxLayout()
@@ -1292,6 +1398,25 @@ class MainWindow(QMainWindow):
         self.load_documents()
         self.apply_theme(self.current_theme)
         
+
+    def closeEvent(self, event):
+        """Sauvegarde la géométrie et la taille du splitter avant fermeture."""
+        try:
+            cfg = config.load_config()
+            g = self.geometry()
+            cfg["window_geometry"]  = [g.x(), g.y(), g.width(), g.height()]
+            # Ne sauvegarder que si le panneau est ouvert (évite de sauver 0)
+            if self._sidebar_open:
+                cfg["splitter_sizes"] = self.splitter.sizes()
+            config.save_config(cfg)
+        except Exception as e:
+            print(f"[WARN] closeEvent save: {e}")
+        super().closeEvent(event)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "_sidebar_btn"):
+            QTimer.singleShot(0, self._reposition_sidebar_btn)
 
     def update_logo(self):
         logo_path = config.get_logo_path(self.current_theme)
@@ -1389,7 +1514,7 @@ class MainWindow(QMainWindow):
         self.setWindowIcon(flag_icon)
 
         # 2) on assemble le texte
-        title = "LibreGED v.2.8.2"
+        title = "LibreGED v.2.9.0"
         if filename:
             title += f" – {filename}"
         self.setWindowTitle(title)
@@ -1907,10 +2032,16 @@ class MainWindow(QMainWindow):
         self.search_bar_widget.setVisible(False)
         self.find_input.clear()
         self._clear_highlights()
+        # Réinitialiser le cache XLSX pour la prochaine ouverture
+        self._xlsx_find_cache = None
+        self._xlsx_find_index = -1
 
     def _find_reset(self):
         """Relance la recherche depuis le début dès que le texte change."""
         self.find_count_label.setText("")
+        # Réinitialiser le cache XLSX (nouveau terme)
+        self._xlsx_find_cache = None
+        self._xlsx_find_index = -1
         self._do_find(forward=True, reset=True)
 
     def _find_next(self):
@@ -1920,7 +2051,7 @@ class MainWindow(QMainWindow):
         self._do_find(forward=False)
 
     def _do_find(self, forward: bool = True, reset: bool = False):
-        """Lance la recherche selon le widget actif."""
+        """Lance la recherche Ctrl+F selon le widget actif dans preview_stack."""
         query = self.find_input.text().strip()
         if not query:
             self._clear_highlights()
@@ -1929,25 +2060,102 @@ class MainWindow(QMainWindow):
 
         current = self.preview_stack.currentWidget()
 
-        # --- QWebEngineView (HTML, EPUB) ---
-        if self.html_preview and current is self.html_preview:
+        # ── QTextEdit (TXT, MD, code…) ────────────────────────────────────
+        if current is self.text_preview:
+            self._highlight_in_text_preview(query, forward, reset)
+            return
+
+        # ── QWebEngineView (HTML, DOCX, ODT, EPUB, MHTML, EML, SVG…) ─────
+        # On compare par type car html_preview peut avoir été recréé
+        if isinstance(current, QWebEngineView):
             from PySide6.QtWebEngineCore import QWebEnginePage
-            flags = QWebEnginePage.FindFlag(0)
-            if not forward:
-                flags = QWebEnginePage.FindBackward
-            self.html_preview.page().findText(
+            flags = QWebEnginePage.FindFlag(0) if forward else QWebEnginePage.FindBackward
+            current.page().findText(
                 query, flags,
                 lambda found: self.find_count_label.setText(
-                    self.t("find_found") if found else self.t("find_not_found")
-                    if "find_found" in self.translations.get(self.current_language, {})
-                    else ("Trouvé" if found else "Introuvable")
+                    "Trouvé" if found else "0 résultat"
                 )
             )
             return
 
-        # --- QTextEdit (TXT, MD, code, HTML fallback) ---
-        if current is self.text_preview:
-            self._highlight_in_text_preview(query, forward, reset)
+        # ── QTabWidget XLSX / ODS ─────────────────────────────────────────
+        if current is self.xlsx_tab_widget:
+            self._find_in_xlsx(query, forward, reset)
+            return
+
+        # ── PDF (image_scroll) ────────────────────────────────────────────
+        if current is self.image_scroll and hasattr(self, "pdf_doc") and self.pdf_doc:
+            self._highlight_term_in_pdf(query)
+            self.find_count_label.setText(
+                "Trouvé" if query else "0 résultat"
+            )
+            return
+
+    def _find_in_xlsx(self, query: str, forward: bool, reset: bool):
+        """
+        Recherche et navigation (suivant/précédent) dans le QTableWidget XLSX actif.
+        """
+        from PySide6.QtGui import QBrush
+        accent     = QColor("#FFD600")
+        accent.setAlpha(220)
+        text_color = QColor("#1A1A1A")
+
+        table = self.xlsx_tab_widget.currentWidget()
+        if not isinstance(table, QTableWidget):
+            self.find_count_label.setText("0 résultat")
+            return
+
+        query_lower = query.lower()
+
+        # Reconstruire la liste des correspondances si le terme ou la feuille a changé
+        cache_key = (id(table), query_lower)
+        if reset or not hasattr(self, "_xlsx_find_cache") or self._xlsx_find_cache[0] != cache_key:
+            matches = []
+            for row in range(table.rowCount()):
+                for col in range(table.columnCount()):
+                    item = table.item(row, col)
+                    if item and query_lower in item.text().lower():
+                        matches.append((row, col))
+            self._xlsx_find_cache   = (cache_key, matches)
+            self._xlsx_find_index   = 0 if matches else -1
+        else:
+            _, matches = self._xlsx_find_cache
+            if matches:
+                if forward:
+                    self._xlsx_find_index = (self._xlsx_find_index + 1) % len(matches)
+                else:
+                    self._xlsx_find_index = (self._xlsx_find_index - 1) % len(matches)
+
+        # Réinitialiser tous les fonds
+        for row in range(table.rowCount()):
+            for col in range(table.columnCount()):
+                item = table.item(row, col)
+                if item:
+                    item.setBackground(QBrush())
+                    item.setForeground(QBrush())
+
+        if not matches:
+            self.find_count_label.setText("0 résultat")
+            return
+
+        # Surligner toutes les occurrences
+        bg_all = QColor("#FFF59D"); bg_all.setAlpha(200)
+        for row, col in matches:
+            item = table.item(row, col)
+            if item:
+                item.setBackground(QBrush(bg_all))
+                item.setForeground(QBrush(text_color))
+
+        # Occurrence courante en jaune vif
+        cur_row, cur_col = matches[self._xlsx_find_index]
+        cur_item = table.item(cur_row, cur_col)
+        if cur_item:
+            cur_item.setBackground(QBrush(accent))
+            table.scrollToItem(cur_item)
+            table.setCurrentItem(cur_item)
+
+        count = len(matches)
+        self.find_count_label.setText(f"{self._xlsx_find_index + 1} / {count}")
 
     def _highlight_in_text_preview(self, query: str, forward: bool, reset: bool):
         """Surligne toutes les occurrences dans QTextEdit et navigue entre elles."""
@@ -2972,8 +3180,8 @@ class MainWindow(QMainWindow):
             self.export_btn.setToolTip(self.t("tooltip_export_stats"))
         if hasattr(self, 'label_tags'):
             self.label_tags.setText(self.t("label_tags"))
-        if hasattr(self, 'meta_tag_input'):
-            self.meta_tag_input.setPlaceholderText(self.t("tag_input_placeholder"))
+        if hasattr(self, 'meta_tag_open_btn'):
+            pass  # libellé fixe, pas de clé de traduction nécessaire
         # Mise à jour de la barre de zoom avec traduction
         if hasattr(self, "zoom_label") and hasattr(self, "pdf_doc") and self.pdf_doc:
             label = self.t("zoom_with_page").format(
@@ -3198,12 +3406,36 @@ class MainWindow(QMainWindow):
 
     
     def eventFilter(self, obj, event):
-        if isinstance(obj, QPushButton):
+        # Opacité animée du bouton accordéon sidebar
+        if hasattr(self, "_sidebar_btn") and obj is self._sidebar_btn:
+            if hasattr(self, "_sidebar_btn_effect"):
+                if event.type() == QEvent.Enter:
+                    self._animate_sidebar_btn_opacity(1.0)
+                elif event.type() == QEvent.Leave:
+                    self._animate_sidebar_btn_opacity(0.32)
+        if isinstance(obj, QPushButton) and obj is not getattr(self, "_sidebar_btn", None):
             if event.type() == QEvent.Enter:
                 obj.setIconSize(QSize(42, 42))
             elif event.type() == QEvent.Leave:
                 obj.setIconSize(QSize(32, 32))
         return super().eventFilter(obj, event)
+
+    def _animate_sidebar_btn_opacity(self, target: float):
+        from PySide6.QtCore import QVariantAnimation
+        if hasattr(self, "_sidebar_opacity_anim") and \
+                self._sidebar_opacity_anim.state() == QVariantAnimation.Running:
+            self._sidebar_opacity_anim.stop()
+        anim = QVariantAnimation(self)
+        anim.setDuration(150)
+        current = self._sidebar_btn_effect.opacity() if hasattr(self, "_sidebar_btn_effect") else 0.32
+        anim.setStartValue(float(current))
+        anim.setEndValue(float(target))
+        anim.valueChanged.connect(
+            lambda v: self._sidebar_btn_effect.setOpacity(v)
+            if hasattr(self, "_sidebar_btn_effect") else None
+        )
+        anim.start()
+        self._sidebar_opacity_anim = anim
         
     def apply_hover_effect(self, button: QPushButton):
         button.setIconSize(QSize(32, 32))
@@ -3383,11 +3615,25 @@ class MainWindow(QMainWindow):
             print("[ERREUR] Aucune image à faire pivoter.")
 
     def zoom_in(self):
+        # Zoom SVG via QWebEngineView
+        if hasattr(self, 'svg_web_view') and self.svg_web_view and \
+                self.preview_stack.currentWidget() is self.svg_web_view:
+            factor = self.svg_web_view.zoomFactor()
+            self.svg_web_view.setZoomFactor(min(factor + 0.15, 5.0))
+            self.zoom_label.setText(f"{self.t('zoom')}{int(self.svg_web_view.zoomFactor() * 100)}%")
+            return
         self.current_zoom = min(self.current_zoom + 0.1, 5.0)
         self.update_zoom_label()
         self.update_pdf_zoom()
 
     def zoom_out(self):
+        # Zoom SVG via QWebEngineView
+        if hasattr(self, 'svg_web_view') and self.svg_web_view and \
+                self.preview_stack.currentWidget() is self.svg_web_view:
+            factor = self.svg_web_view.zoomFactor()
+            self.svg_web_view.setZoomFactor(max(factor - 0.15, 0.2))
+            self.zoom_label.setText(f"{self.t('zoom')}{int(self.svg_web_view.zoomFactor() * 100)}%")
+            return
         self.current_zoom = max(0.2, self.current_zoom - 0.1)
         self.update_zoom_label()
         self.update_pdf_zoom()
@@ -3485,6 +3731,46 @@ class MainWindow(QMainWindow):
         """Declenche par DraggableTreeWidget apres un deplacement interne."""
         self.reindex_files()
 
+    def _on_tree_external_drop(self, paths: list, dest_rel: str, mode: str):
+        """
+        Gère un drag & drop depuis l'explorateur externe (Windows/Linux).
+        mode = "copy" | "move"
+        """
+        import shutil
+        dest_dir = config.FILES_DIR / dest_rel if dest_rel else config.FILES_DIR
+        added = []
+        errors = []
+        for src in paths:
+            src_path = Path(src)
+            dest_path = dest_dir / src_path.name
+            if dest_path.exists():
+                reply = QMessageBox.question(
+                    self,
+                    self.t("file_exists_title"),
+                    self.t("file_exists_message").format(name=src_path.name),
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No
+                )
+                if reply != QMessageBox.StandardButton.Yes:
+                    continue
+            try:
+                if mode == "move":
+                    shutil.move(str(src_path), str(dest_path))
+                else:
+                    if src_path.is_dir():
+                        shutil.copytree(str(src_path), str(dest_path))
+                    else:
+                        shutil.copy2(str(src_path), str(dest_path))
+                added.append(src_path.name)
+            except Exception as e:
+                errors.append(f"{src_path.name} : {e}")
+
+        if errors:
+            QMessageBox.warning(self, self.t("error_title"),
+                                "\n".join(errors))
+        if added:
+            self.reindex_files()
+
     def reindex_files(self):
         class ReindexWorker(QObject):
             progress = Signal(int, int)
@@ -3535,17 +3821,15 @@ class MainWindow(QMainWindow):
         import os
 
         # 1) Choix du type d'import
-        type_choice, ok = QInputDialog.getItem(
-            self,
+        type_choice, ok = self._pick_item_dialog(
             self.t("import_type_title"),
-            self.t("import_type_question"),
+            self.t("import_action_question"),
             [
                 self.t("import_file"),
                 self.t("import_folder"),
                 self.t("create_new_folder"),
                 self.t("import_scan_document"),
-            ],
-            editable=False
+            ]
         )
         if not ok:
             return
@@ -3619,12 +3903,10 @@ class MainWindow(QMainWindow):
             "link": self.t("import_mode_link")     # ex: "Créer un lien symbolique"
         }
         reverse_options = {v: k for k, v in options.items()}
-        selected_text, ok = QInputDialog.getItem(
-            self,
+        selected_text, ok = self._pick_item_dialog(
             self.t("import_mode_title"),
             self.t("import_mode_question"),
-            list(options.values()),
-            editable=False
+            list(options.values())
         )
         if not ok:
             return
@@ -3728,12 +4010,8 @@ class MainWindow(QMainWindow):
             if rel_path:
                 self.load_preview_from_path(rel_path)
 
-        msg = QMessageBox(self)
-        msg.setIcon(QMessageBox.Information)
-        msg.setWindowTitle(self.t("reindex_title"))
-        msg.setText(self.t("reindex_done_message").format(count=count))
-        msg.setStyleSheet(get_message_box_style(self.current_theme))
-        msg.exec()
+        msg_text = self.t("reindex_done_message").format(count=count)
+        self.statusBar().showMessage(f"✅  {msg_text}", 5000)
 
     def on_reindex_error(self, error):
         try:
@@ -4049,7 +4327,7 @@ class MainWindow(QMainWindow):
                     self.show_text_preview(content)
 
             # === TEXTES ===
-            elif ext in [".txt", ".md", ".py", ".epub", ".doc"]:
+            elif ext in [".txt", ".py", ".epub", ".doc"]:
                 self.preview_textual_file(doc_path)
 
             # === PDF ===
@@ -4159,6 +4437,10 @@ class MainWindow(QMainWindow):
             elif ext in (".mhtml", ".mht"):
                 self.show_mhtml_preview(doc_path)
 
+            # === MARKDOWN ===
+            elif ext == ".md":
+                self._show_markdown_preview(doc_path)
+
             # === EML ===
             elif ext == ".eml":
                 self.show_eml_preview(doc_path)
@@ -4172,21 +4454,215 @@ class MainWindow(QMainWindow):
                 self.show_svg_preview(rel_path)
 
             else:
-                self.show_text_preview(self.t("error_unsupported"))
+                self._show_unsupported_file(doc_path)
 
         except Exception as e:
             QMessageBox.critical(self, self.t("error_reading_file"), str(e))
+
+    # ------------------------------------------------------------------
+    # Fichier non supporté nativement
+    # ------------------------------------------------------------------
+    def _show_unsupported_file(self, doc_path: Path):
+        """
+        Affiche un écran 'type non pris en charge' avec bouton pour ouvrir
+        dans l'application par défaut ou une application configurée dans externe.cfg.
+        """
+        from styles import THEMES
+        t_palette = THEMES.get(self.current_theme, THEMES["light"])
+
+        ext = doc_path.suffix.lower()
+        custom_app = self._get_external_app_for_ext(ext)
+
+        msg_unsupported  = self.t("error_unsupported")
+        lbl_open_default = self.translations.get(self.current_language, {}).get(
+            "open_with_default_app", "Ouvrir dans l'application par défaut")
+        lbl_open_custom  = f"Ouvrir avec {custom_app['name']}" if custom_app else ""
+
+        html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+            body {{ font-family: sans-serif; display: flex; flex-direction: column;
+                   align-items: center; justify-content: center; height: 80vh; margin: 0;
+                   background: {t_palette['bg']}; color: {t_palette['text']}; }}
+            .icon {{ font-size: 56px; margin-bottom: 16px; opacity: .45; }}
+            h2 {{ font-weight: 600; margin-bottom: 8px; color: {t_palette['text']}; }}
+            p  {{ color: {t_palette['text_secondary']}; margin-bottom: 28px; font-size: 14px; }}
+            .btn {{ display: inline-block; padding: 10px 24px; border-radius: 8px; cursor: pointer;
+                   font-size: 14px; font-weight: 500; border: none; margin: 6px; }}
+            .btn-primary {{ background: {t_palette['accent']}; color: #fff; }}
+            .btn-secondary {{ background: {t_palette['surface2']};
+                              color: {t_palette['text']}; border: 1px solid {t_palette['border']}; }}
+        </style></head><body>
+            <div class="icon">📄</div>
+            <h2>{doc_path.name}</h2>
+            <p>{msg_unsupported}</p>
+            <button class="btn btn-primary" onclick="pyOpenDefault()">{lbl_open_default}</button>
+            {"<button class='btn btn-secondary' onclick='pyOpenCustom()'>" + lbl_open_custom + "</button>" if custom_app else ""}
+            <script>
+                function pyOpenDefault() {{
+                    history.pushState(null,'','?action=open_default');
+                }}
+                function pyOpenCustom() {{
+                    history.pushState(null,'','?action=open_custom');
+                }}
+            </script>
+        </body></html>"""
+
+        self._unsupported_path   = doc_path
+        self._unsupported_custom = custom_app
+
+        if WEB_ENGINE_AVAILABLE:
+            if hasattr(self, 'html_preview') and self.html_preview:
+                try:
+                    self.preview_stack.removeWidget(self.html_preview)
+                    self.html_preview.deleteLater()
+                except Exception:
+                    pass
+            self.html_preview = QWebEngineView()
+            self.html_preview.setHtml(html)
+            self.html_preview.page().urlChanged.connect(self._on_unsupported_url_changed)
+            self.preview_stack.addWidget(self.html_preview)
+            self.preview_stack.setCurrentWidget(self.html_preview)
+        else:
+            self.show_text_preview(f"{doc_path.name}\n\n{msg_unsupported}")
+
+    def _on_unsupported_url_changed(self, url):
+        """Intercepte les pseudo-navigations JS pour déclencher l'ouverture externe."""
+        qs = url.query()
+        if "action=open_default" in qs:
+            self.open_current_file_with_default_app()
+            if hasattr(self, '_unsupported_path'):
+                self._show_unsupported_file(self._unsupported_path)
+        elif "action=open_custom" in qs:
+            self._open_file_with_custom_app(
+                getattr(self, '_unsupported_path', None),
+                getattr(self, '_unsupported_custom', None)
+            )
+            if hasattr(self, '_unsupported_path'):
+                self._show_unsupported_file(self._unsupported_path)
+
+    def _get_external_app_for_ext(self, ext: str) -> dict | None:
+        """
+        Lit externe.cfg à la racine de USER_DATA_DIR.
+        Retourne {"name": ..., "path": ..., "params": ...} ou None.
+
+        Format de externe.cfg :
+            Extension.MP3
+            Chemin.MP3 = C:\\Program Files\\VLC\\vlc.exe
+            Parametres.MP3 = --fullscreen
+
+            Extension.URL
+            Chemin.URL = C:\\...\\chrome.exe
+            Parametres.URL = --incognito
+        """
+        cfg_path = config.USER_DATA_DIR / "externe.cfg"
+        if not cfg_path.exists():
+            return None
+        try:
+            ext_key = ext.lstrip(".").upper()
+            app: dict = {}
+            current_ext: str | None = None
+            with open(cfg_path, "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    if line.lower().startswith("extension."):
+                        current_ext = line.split(".", 1)[1].strip().upper()
+                    elif current_ext == ext_key and "=" in line:
+                        key, _, val = line.partition("=")
+                        key = key.strip().lower()
+                        val = val.strip()
+                        if key.startswith("chemin."):
+                            app["path"] = val
+                            app["name"] = Path(val).stem
+                        elif key.startswith("parametres.") or key.startswith("parametre."):
+                            app["params"] = val
+            return app if "path" in app else None
+        except Exception as e:
+            print(f"[WARN] externe.cfg: {e}")
+            return None
+
+    def _open_file_with_custom_app(self, file_path, app_cfg):
+        """Lance un fichier avec l'application configurée dans externe.cfg."""
+        if not file_path or not app_cfg:
+            return
+        try:
+            exe    = app_cfg.get("path", "")
+            params = app_cfg.get("params", "").split() if app_cfg.get("params") else []
+            cmd    = [exe] + params + [str(file_path)]
+            from database.path_utils import _clean_env_for_subprocess
+            subprocess.Popen(cmd, env=_clean_env_for_subprocess())
+        except Exception as e:
+            QMessageBox.warning(self, self.t("error_title"),
+                                f"Impossible de lancer l'application :\n{e}")
+
+    def _show_markdown_preview(self, doc_path):
+        """Affiche un fichier Markdown rendu en HTML dans QWebEngineView."""
+        try:
+            with open(win_path(doc_path), "r", encoding="utf-8", errors="ignore") as f:
+                md_text = f.read()
+
+            try:
+                import markdown as md_lib
+                html_body = md_lib.markdown(md_text, extensions=["tables", "fenced_code", "nl2br"])
+            except ImportError:
+                # Fallback sans la bibliothèque markdown : conversion minimale
+                import re, html as html_lib
+                escaped = html_lib.escape(md_text)
+                html_body = re.sub(r'^# (.+)$',   r'<h1>\1</h1>', escaped, flags=re.MULTILINE)
+                html_body = re.sub(r'^## (.+)$',  r'<h2>\1</h2>', html_body, flags=re.MULTILINE)
+                html_body = re.sub(r'^### (.+)$', r'<h3>\1</h3>', html_body, flags=re.MULTILINE)
+                html_body = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', html_body)
+                html_body = re.sub(r'\*(.+?)\*',     r'<em>\1</em>',         html_body)
+                html_body = re.sub(r'`(.+?)`',        r'<code>\1</code>',     html_body)
+                html_body = html_body.replace('\n', '<br>')
+
+            from styles import THEMES
+            t = THEMES.get(self.current_theme, THEMES["light"])
+            full_html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+                body {{ font-family: -apple-system, 'Segoe UI', sans-serif; padding: 24px;
+                        max-width: 960px; margin: auto; background: {t['bg']};
+                        color: {t['text']}; line-height: 1.7; }}
+                h1,h2,h3,h4 {{ color: {t['accent']}; margin-top: 1.4em; }}
+                h1 {{ border-bottom: 2px solid {t['border']}; padding-bottom: .3em; }}
+                code {{ background: {t['surface2']}; padding: 2px 6px; border-radius: 4px;
+                        font-size: .9em; font-family: monospace; }}
+                pre  {{ background: {t['surface2']}; padding: 14px; border-radius: 8px;
+                        overflow-x: auto; }}
+                pre code {{ background: transparent; padding: 0; }}
+                blockquote {{ border-left: 4px solid {t['accent']}; margin: 0; padding-left: 16px;
+                              color: {t['text_secondary']}; font-style: italic; }}
+                table {{ border-collapse: collapse; width: 100%; margin: 1em 0; }}
+                th,td {{ border: 1px solid {t['border']}; padding: 8px 14px; text-align: left; }}
+                th {{ background: {t['surface2']}; font-weight: 600; }}
+                a {{ color: {t['accent']}; }}
+                hr {{ border: none; border-top: 1px solid {t['border']}; }}
+            </style></head><body>{html_body}</body></html>"""
+
+            self.show_html_preview(full_html)
+
+        except Exception as e:
+            self.show_text_preview(f"Erreur lecture Markdown : {e}")
 
     def show_mhtml_preview(self, doc_path):
         """Prévisualise un fichier MHTML via QWebEngineView (support natif)."""
         if not WEB_ENGINE_AVAILABLE:
             self.show_text_preview(self.t("error_webengine_unavailable"))
             return
-        from PySide6.QtCore import QUrl
+
+        # Recréer proprement le QWebEngineView (évite les erreurs sur second affichage)
+        if hasattr(self, 'html_preview') and self.html_preview:
+            try:
+                idx = self.preview_stack.indexOf(self.html_preview)
+                self.preview_stack.removeWidget(self.html_preview)
+                self.html_preview.deleteLater()
+            except Exception:
+                pass
+
+        self.html_preview = QWebEngineView()
         url = QUrl.fromLocalFile(str(doc_path))
         self.html_preview.setUrl(url)
+        self.preview_stack.addWidget(self.html_preview)
         self.preview_stack.setCurrentWidget(self.html_preview)
-        self.clear_nav_bar()
 
     def show_eml_preview(self, doc_path):
         """Prévisualise un fichier EML en extrayant le corps HTML ou texte."""
@@ -4328,9 +4804,15 @@ class MainWindow(QMainWindow):
             self.svg_web_view.deleteLater()
 
         self.svg_web_view = QWebEngineView()
+        self.svg_web_view.setZoomFactor(1.0)
         self.svg_web_view.load(QUrl.fromLocalFile(str(file_path)))
         self.preview_stack.addWidget(self.svg_web_view)
         self.preview_stack.setCurrentWidget(self.svg_web_view)
+        # Activer la barre de zoom (sans PDF ni pages)
+        self.zoom_controls_widget.show()
+        self.prev_page_button.hide()
+        self.next_page_button.hide()
+        self.zoom_label.setText(f"{self.t('zoom')}100%")
 
     def filter_documents(self, text):
         text = text.strip().lower()
@@ -4589,6 +5071,155 @@ class MainWindow(QMainWindow):
     DARK_THEMES = {"dark", "twilight", "ocean", "forest", "sunset",
                    "rose", "slate", "midnight", "brown"}
 
+    # ── Bouton accordéon sidebar ──────────────────────────────────────────────
+
+    def _update_sidebar_btn_style(self):
+        from styles import THEMES
+        p  = THEMES.get(self.current_theme, THEMES["light"])
+        r  = 13
+        self._sidebar_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: {p["surface"]};
+                border: 1.5px solid {p["border"]};
+                border-radius: {r}px;
+            }}
+            QPushButton:hover {{
+                background: {p["surface2"]};
+                border: 1.5px solid {p["accent"]};
+            }}
+            QPushButton:pressed {{
+                background: {p["hover"]};
+                border: 1.5px solid {p["accent"]};
+            }}
+        """)
+        # Opacité via QGraphicsOpacityEffect
+        if not hasattr(self, "_sidebar_btn_effect"):
+            from PySide6.QtWidgets import QGraphicsOpacityEffect
+            self._sidebar_btn_effect = QGraphicsOpacityEffect(self._sidebar_btn)
+            self._sidebar_btn.setGraphicsEffect(self._sidebar_btn_effect)
+            self._sidebar_btn.installEventFilter(self)
+        self._sidebar_btn_effect.setOpacity(0.32)
+
+    def _update_sidebar_btn_icon(self):
+        import qtawesome as qta
+        name = "fa5s.chevron-left" if self._sidebar_open else "fa5s.chevron-right"
+        self._sidebar_btn.setIcon(qta.icon(name, color=self._accent_color(), scale_factor=0.5))
+
+    def _accent_color(self) -> str:
+        from styles import THEMES
+        return THEMES.get(self.current_theme, THEMES["light"])["accent"]
+
+    def _reposition_sidebar_btn(self):
+        """Centre le bouton exactement sur la poignée du splitter, à mi-hauteur."""
+        if not hasattr(self, "_sidebar_btn") or self.splitter.count() < 2:
+            return
+        handle = self.splitter.handle(1)
+        if handle is None:
+            return
+
+        bw = self._sidebar_btn.width()
+        bh = self._sidebar_btn.height()
+
+        # Utiliser mapToParent pour tenir compte des marges du layout
+        handle_pos = handle.mapToParent(handle.rect().topLeft())
+        hx = handle_pos.x()
+        hw = handle.width()
+
+        # Centrer sur la poignée, toujours visible (min 6 px du bord gauche)
+        btn_x = max(6, hx + hw // 2 - bw // 2)
+
+        # Centré verticalement dans la zone du splitter
+        splitter_pos = self.splitter.mapToParent(self.splitter.rect().topLeft())
+        btn_y = splitter_pos.y() + self.splitter.height() // 2 - bh // 2
+
+        self._sidebar_btn.move(btn_x, btn_y)
+        self._sidebar_btn.raise_()
+
+    def _toggle_sidebar(self):
+        # Garde anti-double-clic basé sur un flag (pas sur l'état de l'animation)
+        if getattr(self, "_sidebar_animating", False):
+            return
+        self._sidebar_animating = True
+
+        sizes = self.splitter.sizes()
+        total = sum(sizes)
+
+        if self._sidebar_open:
+            self._sidebar_saved = max(sizes[0], 180)
+            from_v, to_v = sizes[0], 0
+        else:
+            from_v, to_v = 0, self._sidebar_saved
+
+        # QVariantAnimation : pas besoin de proxy ni de Q_PROPERTY
+        from PySide6.QtCore import QVariantAnimation
+        anim = QVariantAnimation(self)
+        anim.setDuration(220)
+        anim.setEasingCurve(QEasingCurve.OutCubic)
+        anim.setStartValue(float(from_v))
+        anim.setEndValue(float(to_v))
+
+        def _on_v(v):
+            iv = int(v)
+            self.splitter.setSizes([iv, max(total - iv, 0)])
+            self._reposition_sidebar_btn()
+
+        def _on_done():
+            self._sidebar_animating = False
+            self._sidebar_open = (to_v > 0)
+            self._update_sidebar_btn_icon()
+            self._reposition_sidebar_btn()
+
+        anim.valueChanged.connect(_on_v)
+        anim.finished.connect(_on_done)
+        anim.start()
+        self._sidebar_anim = anim   # maintenir en vie
+
+    def _pick_item_dialog(self, title: str, label: str, items: list) -> tuple:
+        """
+        Remplace QInputDialog.getItem() avec des boutons traduits via notre système i18n.
+        Retourne (selected_text, ok: bool).
+        """
+        from styles import THEMES, get_message_box_style
+        p = THEMES.get(self.current_theme, THEMES["light"])
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(title)
+        dlg.setMinimumWidth(320)
+        dlg.setStyleSheet(get_message_box_style(self.current_theme))
+
+        layout = QVBoxLayout(dlg)
+        layout.setSpacing(12)
+        layout.setContentsMargins(16, 16, 16, 16)
+
+        lbl = QLabel(label)
+        lbl.setWordWrap(True)
+        layout.addWidget(lbl)
+
+        combo = QComboBox()
+        combo.addItems(items)
+        combo.setStyleSheet(f"background: {p['surface2']}; color: {p['text']}; border: 1px solid {p['border']}; border-radius: 6px; padding: 4px;")
+        layout.addWidget(combo)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+
+        btn_cancel = QPushButton(self.t("btn_cancel"))
+        btn_cancel.setFixedWidth(90)
+        btn_cancel.clicked.connect(dlg.reject)
+
+        btn_ok = QPushButton(self.t("btn_ok"))
+        btn_ok.setFixedWidth(90)
+        btn_ok.setDefault(True)
+        btn_ok.clicked.connect(dlg.accept)
+        btn_ok.setStyleSheet(f"background: {p['accent']}; color: #fff; border: none; border-radius: 6px; padding: 6px;")
+
+        btn_row.addWidget(btn_cancel)
+        btn_row.addWidget(btn_ok)
+        layout.addLayout(btn_row)
+
+        result = dlg.exec()
+        return (combo.currentText(), result == QDialog.Accepted)
+
     def apply_theme(self, theme_name: str):
         self.current_theme = theme_name
         # Sauvegarder en premier — avant toute opération qui pourrait échouer
@@ -4603,9 +5234,14 @@ class MainWindow(QMainWindow):
         apply_common_styles(self)
         if hasattr(self, "folder_browser"):
             self.folder_browser.set_theme(theme_name)
-        arrow_color = "white" if theme_name in self.DARK_THEMES else "black"
-        self.meta_tag_input_arrow.setIcon(qta.icon("fa5s.chevron-down", color=arrow_color))
-        self.meta_tag_input.setStyleSheet(get_tag_input_style(theme_name))
+        if hasattr(self, "tree") and self.tree.itemDelegate():
+            from styles import THEMES as _TH
+            _tp = _TH.get(theme_name, _TH["light"])
+            self.tree.itemDelegate().accent_color = _tp["accent"]
+            self.tree.viewport().update()
+        if hasattr(self, "_sidebar_btn"):
+            self._update_sidebar_btn_style()
+            self._update_sidebar_btn_icon()
         self.update_logo()
 
     def get_palette_for_theme(self, theme_name: str) -> QPalette:
@@ -4754,6 +5390,9 @@ class MainWindow(QMainWindow):
         self.save_confirmation_label.show()
         QTimer.singleShot(2000, self.save_confirmation_label.hide)
 
+        # Rafraîchir la liste des tags dans le combo (intègre le nouveau tag)
+        self.refresh_tag_suggestions()
+
 
 
     def set_metadata_fields_enabled(self, enabled: bool):
@@ -4771,10 +5410,30 @@ class MainWindow(QMainWindow):
         self.metadata_animation.stop()
 
         if is_open:
-            self.metadata_form.setMaximumHeight(0)  # Reset animation
+            self.metadata_form.setMaximumHeight(0)
             self.metadata_form.show()
+
+            # Calcul de la hauteur cible sans sizeHint (biaisé par les chips)
+            # Sommer les hauteurs minimales connues de chaque rangée
+            tags_h    = max(self.meta_tags_container.minimumHeight(), 64)
+            comment_h = self.meta_comment_field.minimumHeight()
+            field_h   = 30   # ligne auteur / version / modifié le
+            button_h  = 40   # bouton Enregistrer
+            spacing   = self.metadata_layout.verticalSpacing()
+            margins   = (self.metadata_layout.contentsMargins().top()
+                         + self.metadata_layout.contentsMargins().bottom())
+            target_h  = (
+                field_h   +   # auteur       (row 0)
+                tags_h    +   # tags          (row 1)
+                comment_h +   # commentaire   (row 2)
+                field_h   +   # version       (row 3)
+                field_h   +   # modifié le    (row 4)
+                button_h  +   # enregistrer   (row 5)
+                spacing * 5 + margins + 8
+            )
+
             self.metadata_animation.setStartValue(0)
-            self.metadata_animation.setEndValue(self.metadata_form.sizeHint().height())
+            self.metadata_animation.setEndValue(target_h)
         else:
             self.metadata_animation.setStartValue(self.metadata_form.height())
             self.metadata_animation.setEndValue(0)
@@ -4782,63 +5441,37 @@ class MainWindow(QMainWindow):
         self.metadata_animation.start()
 
     def on_metadata_animation_finished(self):
-        if not self.toggle_metadata_button.isChecked():
+        if self.toggle_metadata_button.isChecked():
+            # Libérer la contrainte de hauteur max → le formulaire peut
+            # s'adapter librement si les tags occupent plusieurs lignes
+            self.metadata_form.setMaximumHeight(16777215)
+        else:
             self.metadata_form.hide()
 
     def add_tag_from_input(self):
-        tag = self.meta_tag_input.currentText().strip()
-        self.add_tag(tag)
+        """Conservé pour compatibilité — non utilisé avec le nouveau TagPickerDialog."""
+        pass
 
     def clear_tags_from_layout(self):
-        """Supprime tous les widgets de tags du layout, sauf le champ d'entrée."""
+        """Supprime tous les widgets de tags du FlowLayout."""
         for i in reversed(range(self.meta_tags_layout.count())):
             item = self.meta_tags_layout.itemAt(i)
-            widget = item.widget()
-            if widget and widget != self.meta_tag_input:
+            widget = item.widget() if item else None
+            if widget:
                 widget.deleteLater()
                 widget.setParent(None)
 
-
     def on_tag_typing(self, text):
-        if "," in text:
-            parts = text.split(",")
-            for part in parts[:-1]:
-                part = part.strip()
-                if part and part not in self.current_tags:
-                    self.add_tag(part)
-            self.meta_tag_input.setText(parts[-1].strip())
+        """Conservé pour compatibilité — non utilisé avec le nouveau TagPickerDialog."""
+        pass
 
     def add_tag(self, tag):
-        if not tag or tag.lower() in [t.lower() for t in self.current_tags]:
+        """Ajoute un tag par programmation (utilisé par load_metadata)."""
+        if not tag or any(t.casefold() == tag.casefold() for t in self.current_tags):
             return
-
         widget = self.create_tag_widget(tag)
-        widget.setGraphicsEffect(QGraphicsOpacityEffect(widget))
-        widget.graphicsEffect().setOpacity(0)
-
         self.meta_tags_layout.addWidget(widget)
         self.current_tags.append(tag)
-
-        # Animation
-        fade_anim = QPropertyAnimation(widget.graphicsEffect(), b"opacity")
-        fade_anim.setDuration(300)
-        fade_anim.setStartValue(0.0)
-        fade_anim.setEndValue(1.0)
-
-        grow_anim = QPropertyAnimation(widget, b"maximumHeight")
-        grow_anim.setDuration(300)
-        grow_anim.setStartValue(0)
-        grow_anim.setEndValue(32)
-
-        anim_group = QParallelAnimationGroup()
-        anim_group.addAnimation(fade_anim)
-        anim_group.addAnimation(grow_anim)
-        anim_group.start()
-        widget._anim_group = anim_group  # évite le GC
-
-        self.meta_tag_input.setCurrentText("")
-        
-        self.refresh_tag_suggestions()
 
     def remove_tag(self, widget):
         tag = widget.property("tag_text")
@@ -4850,93 +5483,148 @@ class MainWindow(QMainWindow):
     def setup_metadata_tags_field(self):
         self.current_tags = []
 
+        # Zone d'affichage des tags sélectionnés (pilules colorées)
         self.meta_tags_display = QWidget()
-        self.meta_tags_layout = FlowLayout()
+        self.meta_tags_layout  = FlowLayout()
         self.meta_tags_display.setLayout(self.meta_tags_layout)
 
-        self.meta_tag_input = QComboBox()
-        self.meta_tag_input.setFixedHeight(28)
-        self.meta_tag_input.setStyleSheet(get_tag_input_style(self.current_theme))
+        # Bouton d'ouverture du gestionnaire de tags
+        self.meta_tag_open_btn = QPushButton()
+        self.meta_tag_open_btn.setIcon(qta.icon("fa5s.tags", color="#007BFF"))
+        self.meta_tag_open_btn.setText("  Gérer les tags…")
+        self.meta_tag_open_btn.setFixedHeight(28)
+        self.meta_tag_open_btn.setCursor(Qt.PointingHandCursor)
+        self.meta_tag_open_btn.clicked.connect(self._open_tag_picker)
 
-        self.meta_tag_input.setEditable(True)
-        line_edit = self.meta_tag_input.lineEdit()
-        line_edit.returnPressed.connect(self.add_tag_from_input)
-        self.meta_tag_input.setInsertPolicy(QComboBox.NoInsert)
-
-        completer = self.meta_tag_input.completer()
-        completer.setCaseSensitivity(Qt.CaseInsensitive)
-        self.refresh_tag_suggestions()
-
-        self.meta_tag_add_button = QPushButton("+")
-        self.meta_tag_add_button.setFixedSize(24, 24)
-        self.meta_tag_add_button.setObjectName("tagAddButton")
-        self.meta_tag_add_button.clicked.connect(self.add_tag_from_input)
-
-        input_row = QHBoxLayout()
-        input_row.setContentsMargins(0, 0, 0, 0)
-        input_row.setSpacing(4)
-        input_row.addWidget(self.meta_tag_input)
-        input_row.addWidget(self.meta_tag_add_button)
-        input_row.addStretch()
+        btn_row = QHBoxLayout()
+        btn_row.setContentsMargins(0, 0, 0, 0)
+        btn_row.addWidget(self.meta_tag_open_btn)
+        btn_row.addStretch()
 
         self.meta_tags_container = QWidget()
-        container_layout = QVBoxLayout(self.meta_tags_container)
-        container_layout.setContentsMargins(0, 0, 0, 0)
-        container_layout.setSpacing(4)
-        container_layout.addWidget(self.meta_tags_display)
-        container_layout.addLayout(input_row)
+        cl = QVBoxLayout(self.meta_tags_container)
+        cl.setContentsMargins(0, 0, 0, 0)
+        cl.setSpacing(4)
+        cl.addWidget(self.meta_tags_display)
+        cl.addLayout(btn_row)
+        self.meta_tags_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.MinimumExpanding)
+        self.meta_tags_container.setMinimumHeight(60)
 
         self.label_tags = QLabel(self.t("label_tags"))
-        self.metadata_layout.addWidget(self.label_tags, 1, 0)
+        self.metadata_layout.addWidget(self.label_tags, 1, 0, Qt.AlignTop)
         self.metadata_layout.addWidget(self.meta_tags_container, 1, 1)
+        # Hauteur minimale garantie pour la rangée tags (pilules + bouton)
+        self.metadata_layout.setRowMinimumHeight(1, 64)
 
-        # Ajout de l'icône de flèche QtAwesome
-        self.meta_tag_input_arrow = QToolButton(self.meta_tag_input)
-        self.meta_tag_input_arrow.setIcon(
-            qta.icon("fa5s.chevron-down", color="black" if self.current_theme == "light" else "white")
+    def _open_tag_picker(self):
+        """Ouvre le TagPickerDialog et applique le résultat."""
+        # Fusionner tags DB + tags en mémoire (non encore enregistrés)
+        db_tags = get_all_tags()
+        all_tags = sorted(set(db_tags) | set(self.current_tags), key=str.casefold)
+        dlg = TagPickerDialog(
+            current_tags=list(self.current_tags),
+            all_tags=all_tags,
+            translate_fn=self.t,
+            theme=self.current_theme,
+            parent=self
         )
-        self.meta_tag_input_arrow.setCursor(Qt.PointingHandCursor)
-        self.meta_tag_input_arrow.setStyleSheet("border: none;")
-        self.meta_tag_input_arrow.setFixedSize(18, 18)
-        self.meta_tag_input_arrow.setFocusPolicy(Qt.NoFocus)
-        self.meta_tag_input_arrow.clicked.connect(self.meta_tag_input.showPopup)
+        if dlg.exec() != QDialog.Accepted:
+            return
 
+        # ── Opérations globales sur la DB ──────────────────────────────────
+        if dlg.pending_rename:
+            old_name, new_name = dlg.pending_rename
+            self._rename_tag_in_db(old_name, new_name)
 
-        # Positionner le bouton à droite dans le QComboBox
-        frame_width = self.meta_tag_input.style().pixelMetric(QStyle.PM_DefaultFrameWidth)
-        self.meta_tag_input_arrow.move(
-            self.meta_tag_input.rect().right() - self.meta_tag_input_arrow.width() - frame_width,
-            (self.meta_tag_input.rect().height() - self.meta_tag_input_arrow.height()) // 2
-        )
-        self.meta_tag_input_arrow.raise_()
+        for tag_to_del in dlg.pending_deletes:
+            self._delete_tag_from_db(tag_to_del)
 
-        self.meta_tag_input.resizeEvent = lambda event: (self.reposition_tag_input_arrow(), QComboBox.resizeEvent(self.meta_tag_input, event))
+        # ── Mise à jour de l'affichage local ──────────────────────────────
+        self.current_tags = dlg.current_tags
+        self.clear_tags_from_layout()
+        for tag in self.current_tags:
+            widget = self.create_tag_widget(tag)
+            self.meta_tags_layout.addWidget(widget)
+
+        # Rafraîchir les suggestions
+        self.refresh_tag_suggestions()
+
+    def _rename_tag_in_db(self, old_name: str, new_name: str):
+        """Renomme un tag dans document_metadata pour tous les documents."""
+        try:
+            with sqlite3.connect(config.DB_PATH) as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT document_path, tags FROM document_metadata")
+                rows = cur.fetchall()
+                for path, tags_str in rows:
+                    if not tags_str:
+                        continue
+                    tags = [t.strip() for t in tags_str.split(",")]
+                    new_tags = [new_name if t.casefold() == old_name.casefold() else t
+                                for t in tags]
+                    if new_tags != tags:
+                        cur.execute(
+                            "UPDATE document_metadata SET tags=? WHERE document_path=?",
+                            (", ".join(new_tags), path)
+                        )
+                conn.commit()
+            self.statusBar().showMessage(
+                f"✅  Tag « {old_name} » renommé en « {new_name} »", 4000)
+        except Exception as e:
+            QMessageBox.warning(self, self.t("error_title"),
+                                f"Erreur renommage tag :\n{e}")
+
+    def _delete_tag_from_db(self, tag_name: str):
+        """Supprime un tag de document_metadata pour tous les documents."""
+        try:
+            with sqlite3.connect(config.DB_PATH) as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT document_path, tags FROM document_metadata")
+                rows = cur.fetchall()
+                for path, tags_str in rows:
+                    if not tags_str:
+                        continue
+                    tags = [t.strip() for t in tags_str.split(",")
+                            if t.strip().casefold() != tag_name.casefold()]
+                    cur.execute(
+                        "UPDATE document_metadata SET tags=? WHERE document_path=?",
+                        (", ".join(tags), path)
+                    )
+                conn.commit()
+            self.statusBar().showMessage(
+                f"✅  Tag « {tag_name} » supprimé de tous les documents", 4000)
+        except Exception as e:
+            QMessageBox.warning(self, self.t("error_title"),
+                                f"Erreur suppression tag :\n{e}")
 
     
     def update_tag_input_icon(self):
-        color = "black" if self.current_theme == "light" else "white"
-        arrow_icon = qta.icon("fa5s.chevron-down", color=color)
-        self.meta_tag_input_arrow.setIcon(arrow_icon)
-    
+        pass  # supprimé avec le QComboBox — conservé pour compatibilité
+
     def reposition_tag_input_arrow(self):
-        if hasattr(self, "meta_tag_input_arrow"):
-            frame_width = self.meta_tag_input.style().pixelMetric(QStyle.PM_DefaultFrameWidth)
-            self.meta_tag_input_arrow.move(
-                self.meta_tag_input.rect().right() - self.meta_tag_input_arrow.width() - frame_width,
-                (self.meta_tag_input.rect().height() - self.meta_tag_input_arrow.height()) // 2
-            )
+        pass  # supprimé avec le QComboBox — conservé pour compatibilité
 
 
     def create_tag_widget(self, tag):
         tag_widget = QWidget()
         tag_widget.setProperty("tag_text", tag)
 
-        color = TAG_COLORS[hash(tag) % len(TAG_COLORS)]
+        color = tag_color(tag)
+
+        # Couleur assombrie pour le hover (déterministe, toujours lisible)
+        r = int(int(color[1:3], 16) * 0.78)
+        g = int(int(color[3:5], 16) * 0.78)
+        b = int(int(color[5:7], 16) * 0.78)
+        color_hover = f"#{r:02x}{g:02x}{b:02x}"
+
         tag_widget.setStyleSheet(f"""
             QWidget {{
                 background-color: {color};
                 border-radius: 12px;
                 padding: 4px 6px;
+            }}
+            QWidget:hover {{
+                background-color: {color_hover};
             }}
         """)
 
@@ -4945,11 +5633,14 @@ class MainWindow(QMainWindow):
         layout.setSpacing(4)
 
         label = QLabel(tag)
-        label.setStyleSheet("color: white; font-size: 11px;")
+        label.setStyleSheet(
+            "color: white; font-size: 11px; font-weight: 600;"
+            "background: transparent; border: none;"
+        )
         label.setToolTip(tag)
         label.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Preferred)
 
-        remove_btn = QPushButton("Ã—")
+        remove_btn = QPushButton("×")
         remove_btn.setObjectName("tagRemoveButton")
         remove_btn.setCursor(Qt.PointingHandCursor)
         remove_btn.setFixedSize(16, 16)
@@ -4957,11 +5648,12 @@ class MainWindow(QMainWindow):
             QPushButton#tagRemoveButton {
                 background-color: transparent;
                 color: white;
-                font-size: 12px;
+                font-size: 13px;
+                font-weight: bold;
                 border: none;
             }
             QPushButton#tagRemoveButton:hover {
-                color: #ff6666;
+                color: #ffcccc;
             }
         """)
         remove_btn.clicked.connect(lambda _, w=tag_widget: self.remove_tag(w))
@@ -5036,14 +5728,8 @@ class MainWindow(QMainWindow):
 
 
     def refresh_tag_suggestions(self):
-        tags = get_all_tags()
-
-        self.meta_tag_input.clear()
-        placeholder = self.t("tag_input_placeholder")
-        self.meta_tag_input.addItem(placeholder)
-        self.meta_tag_input.model().item(0).setEnabled(False)
-
-        self.meta_tag_input.addItems(sorted(set(tags), key=str.lower))
+        """Pas d'action nécessaire : les suggestions sont chargées à l'ouverture du TagPickerDialog."""
+        pass
 
 
     def load_tag_filter(self):
@@ -5137,11 +5823,19 @@ class MainWindow(QMainWindow):
             act_add.triggered.connect(lambda: self.add_files_to_folder(rel_path))
             menu.addAction(act_add)
 
+            act_rename_ctx = QAction(self.t("rename_title"), self)
+            act_rename_ctx.triggered.connect(lambda: self.rename_selected_item())
+            menu.addAction(act_rename_ctx)
+
         # 3) FICHIER Â« NATIF Â»
         elif full_path.is_file():
             act_open = QAction(self.t("context_open_folder"), self)
             act_open.triggered.connect(lambda: self.open_folder_for_item(rel_path))
             menu.addAction(act_open)
+
+            act_rename_ctx = QAction(self.t("rename_title"), self)
+            act_rename_ctx.triggered.connect(lambda: self.rename_selected_item())
+            menu.addAction(act_rename_ctx)
 
         # --- Option commune à tous (symlink ou non) : déplacer ---
         act_move = QAction(self.t("context_move_item"), self)
@@ -5188,12 +5882,10 @@ class MainWindow(QMainWindow):
 
         reverse_options = {v: k for k, v in options.items()}
 
-        selected_text, ok = QInputDialog.getItem(
-            self,
+        selected_text, ok = self._pick_item_dialog(
             self.t("import_mode_title"),
             self.t("import_mode_question"),
-            list(options.values()),
-            editable=False
+            list(options.values())
         )
 
         if not ok:
@@ -5521,6 +6213,563 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QFontMetrics
 from styles import get_tag_widget_style
 
+# ──────────────────────────────────────────────────────────────────────────────
+# TagPickerDialog — sélecteur de tags alphabétique avec navigation clavier
+# ──────────────────────────────────────────────────────────────────────────────
+class _ChipArea(QWidget):
+    """
+    Zone d'affichage de chips à enroulement automatique.
+    Contourne les problèmes de sizeHint prématuré de QPushButton sous QLayout
+    en positionnant les enfants manuellement via resizeEvent.
+    """
+    _SPACING = 8
+    _MARGIN  = 8
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._chips: list = []          # [(widget, w, h), ...]
+
+    def add_chip(self, widget: QWidget):
+        widget.setParent(self)
+        widget.show()
+        # Utiliser la taille déjà fixée (setFixedSize appelé avant add_chip)
+        # widget.size() est fiable car setFixedSize → resize() est synchrone
+        sz = widget.size()
+        w  = sz.width()  if sz.width()  > 4 else 80
+        h  = sz.height() if sz.height() > 4 else 26
+        self._chips.append((widget, w, h))
+        self._relayout()
+        self.updateGeometry()
+
+    def clear_chips(self):
+        for widget, _, __ in self._chips:
+            widget.hide()
+            widget.deleteLater()
+        self._chips.clear()
+        self.setMinimumHeight(self._MARGIN * 2)
+        self.updateGeometry()
+
+    def chip_count(self) -> int:
+        return len(self._chips)
+
+    def chip_widgets(self):
+        return [w for w, _, __ in self._chips]
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._relayout()
+
+    def _relayout(self):
+        avail = max(self.width() - self._MARGIN * 2, 80)
+        x = self._MARGIN
+        y = self._MARGIN
+        row_h = 0
+        for widget, w, h in self._chips:
+            if x + w > avail + self._MARGIN and x > self._MARGIN:
+                x  = self._MARGIN
+                y += row_h + self._SPACING
+                row_h = 0
+            widget.setGeometry(x, y, w, h)
+            x    += w + self._SPACING
+            row_h = max(row_h, h)
+        self.setMinimumHeight(y + row_h + self._MARGIN)
+
+    def sizeHint(self):
+        # Calculer la hauteur pour la largeur actuelle
+        avail = max(self.width() - self._MARGIN * 2, 80)
+        x = self._MARGIN
+        y = self._MARGIN
+        row_h = 0
+        for _, w, h in self._chips:
+            if x + w > avail + self._MARGIN and x > self._MARGIN:
+                x  = self._MARGIN
+                y += row_h + self._SPACING
+                row_h = 0
+            x    += w + self._SPACING
+            row_h = max(row_h, h)
+        total_h = y + row_h + self._MARGIN
+        return QSize(self.width(), max(total_h, 40))
+
+
+class TagPickerDialog(QDialog):
+    """
+    Gestionnaire de tags.
+    • Barre A–Z : filtre les chips par lettre initiale
+    • Navigation clavier : taper une lettre filtre ; la retaper cycle entre les tags
+    • Clic / Entrée : sélectionne ou désélectionne un tag
+    • Barre basse : tags actifs avec bouton × pour retirer
+    • AJOUTER / RENOMMER / SUPPRIMER : gestion globale des tags
+    """
+
+    # Couleurs gérées par tag_color() au niveau module (déterministe, stable entre sessions)
+
+    def __init__(self, current_tags: list, all_tags: list,
+                 translate_fn, theme: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Gestionnaire de tags")
+        self.setMinimumSize(700, 460)
+        self.setModal(True)
+
+        self.current_tags: list = list(current_tags)
+        self.all_tags:     list = sorted(set(all_tags), key=str.casefold)
+        self.t             = translate_fn
+        self.theme         = theme
+
+        self._active_letter: str  = ""
+        self._cycle_list:    list = []
+        self._cycle_index:   int  = -1
+        self._last_clicked_tag: str | None = None   # dernier chip cliqué (pour Renommer/Supprimer)
+
+        self.pending_rename:  tuple | None = None
+        self.pending_deletes: list         = []
+
+        self._grid_btns: dict = {}   # tag → QPushButton
+
+        self._build_ui()
+        self._filter_by_letter("")
+
+    # ── helpers ───────────────────────────────────────────────────────────────
+
+    def _chip_color(self, t: str) -> str:
+        return tag_color(t)
+
+    def _chip_style(self, color: str, selected: bool) -> str:
+        if selected:
+            return (
+                f"QPushButton {{ background: {color}; color: #fff;"
+                f"  border: 2px solid {color}; border-radius: 11px;"
+                f"  padding: 3px 10px; font-size: 12px; font-weight: 600; }}"
+                f"QPushButton:hover {{ background: {color}; color: #fff; border: 2px solid {color}; }}"
+            )
+        # Non sélectionné → contour coloré, transparent
+        # Hover → fond plein coloré + texte blanc (lisible en thème clair et sombre)
+        return (
+            f"QPushButton {{ background: transparent; color: {color};"
+            f"  border: 2px solid {color}; border-radius: 11px;"
+            f"  padding: 3px 10px; font-size: 12px; }}"
+            f"QPushButton:hover {{ background: {color}; color: #fff; border: 2px solid {color}; }}"
+        )
+
+    def _chip_size(self, text: str) -> tuple:
+        """
+        Calcule (w, h) d'un chip via QFontMetrics — aucune dépendance au sizeHint
+        de QPushButton (qui est faux avant le premier rendu avec un stylesheet).
+        """
+        from PySide6.QtGui import QFont, QFontMetrics
+        f = QFont(self.font())
+        f.setPixelSize(13)          # ~ font-size: 12px du stylesheet
+        fm = QFontMetrics(f)
+        # padding CSS : left 10 + right 10 + 2 borders de 2px = 24
+        return (max(fm.horizontalAdvance(text) + 28, 52), 28)
+
+    def _make_chip_btn(self, tag: str, is_sel: bool) -> QPushButton:
+        """Crée un QPushButton-chip avec taille explicite."""
+        color = self._chip_color(tag)
+        label = ("✓  " if is_sel else "") + tag
+        btn   = QPushButton(label)
+        btn.setCheckable(True)
+        btn.setChecked(is_sel)
+        btn.setStyleSheet(self._chip_style(color, is_sel))
+        w, h = self._chip_size(label)
+        btn.setFixedSize(w, h)
+
+        def _on_click(chk, t=tag):
+            self._last_clicked_tag = t   # mémoriser avant le toggle
+            self._toggle_tag(t, chk)
+
+        btn.clicked.connect(_on_click)
+        return btn
+
+    # ── UI build ──────────────────────────────────────────────────────────────
+
+    def _build_ui(self):
+        from styles import THEMES
+        p = THEMES.get(self.theme, THEMES["light"])
+
+        self.setStyleSheet(f"""
+            QDialog     {{ background: {p["bg"]}; color: {p["text"]}; }}
+            QScrollArea {{ border: none; background: transparent; }}
+            QLabel       {{ color: {p["text"]}; background: transparent; }}
+            QScrollBar:vertical   {{ width: 6px; background: {p["surface2"]}; border-radius: 3px; }}
+            QScrollBar::handle:vertical {{ background: {p["border"]}; border-radius: 3px; }}
+        """)
+
+        root = QVBoxLayout(self)
+        root.setSpacing(10)
+        root.setContentsMargins(14, 14, 14, 14)
+
+        # ── Barre alphabet ──────────────────────────────────────────────────
+        alpha_bar = QWidget()
+        alpha_bar.setStyleSheet(
+            f"background: {p['surface2']}; border-radius: 8px;"
+            f"border: 1px solid {p['border']};"
+        )
+        al = QHBoxLayout(alpha_bar)
+        al.setContentsMargins(6, 4, 6, 4)
+        al.setSpacing(2)
+
+        alpha_style = (
+            f"QPushButton {{ background: transparent; color: {p['text']};"
+            f"  border: none; border-radius: 5px;"
+            f"  min-width: 22px; max-width: 22px; min-height: 22px; max-height: 22px;"
+            f"  font-weight: bold; font-size: 11px; padding: 0; }}"
+            f"QPushButton:hover   {{ background: {p['hover']}; }}"
+            f"QPushButton:checked {{ background: {p['accent']}; color: #fff; }}"
+        )
+
+        self._alpha_btns: dict = {}
+        b_all = QPushButton("*")
+        b_all.setCheckable(True); b_all.setChecked(True)
+        b_all.setStyleSheet(alpha_style)
+        b_all.clicked.connect(lambda: self._filter_by_letter(""))
+        self._alpha_btns[""] = b_all
+        al.addWidget(b_all)
+
+        for ch in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+            b = QPushButton(ch)
+            b.setCheckable(True)
+            b.setStyleSheet(alpha_style)
+            b.clicked.connect(lambda _, c=ch: self._filter_by_letter(c))
+            self._alpha_btns[ch] = b
+            al.addWidget(b)
+
+        al.addStretch()
+        root.addWidget(alpha_bar)
+
+        # ── Zone centrale : chips + boutons ────────────────────────────────
+        centre = QHBoxLayout()
+        centre.setSpacing(12)
+
+        self._chip_scroll = QScrollArea()
+        self._chip_scroll.setWidgetResizable(True)
+        self._chip_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._chip_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+
+        self._chip_bg = QWidget()
+        self._chip_bg.setStyleSheet(
+            f"background: {p['surface']}; border: 1px solid {p['border']};"
+            f"border-radius: 8px;"
+        )
+        bg_layout = QVBoxLayout(self._chip_bg)
+        bg_layout.setContentsMargins(0, 0, 0, 0)
+        bg_layout.setSpacing(0)
+
+        self._chip_area = _ChipArea()
+        self._chip_area.setStyleSheet("background: transparent; border: none;")
+        bg_layout.addWidget(self._chip_area, 0, Qt.AlignTop)
+        bg_layout.addStretch()
+
+        self._chip_scroll.setWidget(self._chip_bg)
+        centre.addWidget(self._chip_scroll, 1)
+
+        # Boutons action
+        action_col = QVBoxLayout()
+        action_col.setSpacing(8)
+
+        def _darken(hex_color: str, factor: float = 0.82) -> str:
+            """Assombrit une couleur hex de `factor` (0.82 = -18%)."""
+            c = hex_color.lstrip("#")
+            r = int(int(c[0:2], 16) * factor)
+            g = int(int(c[2:4], 16) * factor)
+            b = int(int(c[4:6], 16) * factor)
+            return f"#{r:02x}{g:02x}{b:02x}"
+
+        def _abtn(label: str, color: str) -> QPushButton:
+            darker  = _darken(color, 0.82)
+            darkest = _darken(color, 0.68)
+            b = QPushButton(label)
+            b.setFixedWidth(120)
+            b.setStyleSheet(
+                f"QPushButton {{ background: {color}; color: #fff; border: none;"
+                f"  border-radius: 7px; padding: 7px 4px; font-weight: 700;"
+                f"  font-size: 12px; letter-spacing: 0.5px; }}"
+                f"QPushButton:hover   {{ background: {darker};  color: #fff; border: none; }}"
+                f"QPushButton:pressed {{ background: {darkest}; color: #fff; border: none; }}"
+            )
+            return b
+
+        self.btn_add_new  = _abtn("AJOUTER",     "#28a745")
+        self.btn_rename   = _abtn("RENOMMER",    "#007BFF")
+        self.btn_del_glob = _abtn("SUPPRIMER",   "#dc3545")
+        self.btn_ok       = _abtn("ENREGISTRER", p["accent"])
+
+        self.btn_add_new.clicked.connect(self._on_add_new)
+        self.btn_rename.clicked.connect(self._on_rename)
+        self.btn_del_glob.clicked.connect(self._on_delete_global)
+        self.btn_ok.clicked.connect(self.accept)
+
+        action_col.addWidget(self.btn_add_new)
+        action_col.addWidget(self.btn_rename)
+        action_col.addWidget(self.btn_del_glob)
+        action_col.addStretch()
+        action_col.addWidget(self.btn_ok)
+        centre.addLayout(action_col)
+
+        root.addLayout(centre, 1)
+
+        # ── Barre basse ─────────────────────────────────────────────────────
+        sel_frame = QFrame()
+        sel_frame.setStyleSheet(
+            f"QFrame {{ background: {p['surface2']}; border-radius: 8px;"
+            f"  border: 1px solid {p['border']}; }}"
+        )
+        sel_frame.setFixedHeight(50)
+
+        sel_outer = QHBoxLayout(sel_frame)
+        sel_outer.setContentsMargins(8, 5, 8, 5)
+        sel_outer.setSpacing(6)
+
+        lbl_sel = QLabel("Tags :")
+        lbl_sel.setStyleSheet(
+            f"color: {p['text_secondary']}; font-size: 11px;"
+            "background: transparent; border: none; min-width: 38px;"
+        )
+        sel_outer.addWidget(lbl_sel)
+
+        self._sel_scroll = QScrollArea()
+        self._sel_scroll.setWidgetResizable(True)
+        self._sel_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._sel_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self._sel_scroll.setFrameShape(QFrame.NoFrame)
+        self._sel_scroll.setStyleSheet("background: transparent; border: none;")
+
+        self._sel_widget = QWidget()
+        self._sel_widget.setStyleSheet("background: transparent;")
+        self._sel_layout = QHBoxLayout(self._sel_widget)
+        self._sel_layout.setContentsMargins(0, 2, 0, 2)
+        self._sel_layout.setSpacing(6)
+        self._sel_layout.addStretch()
+        self._sel_scroll.setWidget(self._sel_widget)
+
+        sel_outer.addWidget(self._sel_scroll, 1)
+        root.addWidget(sel_frame)
+
+    # ── Filtering ─────────────────────────────────────────────────────────────
+
+    def _filter_by_letter(self, letter: str):
+        for ch, btn in self._alpha_btns.items():
+            btn.setChecked(ch == letter)
+        self._active_letter = letter
+        self._cycle_list    = []
+        self._cycle_index   = -1
+        self._repopulate_chips(letter)
+
+    def _repopulate_chips(self, letter: str):
+        self._chip_area.clear_chips()
+        self._grid_btns.clear()
+
+        tags = (
+            [t for t in self.all_tags if t.casefold().startswith(letter.casefold())]
+            if letter else list(self.all_tags)
+        )
+
+        if not tags:
+            from styles import THEMES
+            p = THEMES.get(self.theme, THEMES["light"])
+            lbl = QLabel(
+                "  Aucun tag pour cette lettre" if letter
+                else "  Aucun tag — cliquez sur AJOUTER"
+            )
+            lbl.setStyleSheet(
+                f"color: {p['text_secondary']}; font-style: italic;"
+                "padding: 12px; background: transparent; border: none;"
+            )
+            self._chip_area.add_chip(lbl)
+            self._cycle_list = []
+            self._refresh_selected_bar()
+            return
+
+        for tag in tags:
+            is_sel = any(t.casefold() == tag.casefold() for t in self.current_tags)
+            btn = self._make_chip_btn(tag, is_sel)  # setFixedSize déjà appelé
+            self._chip_area.add_chip(btn)
+            self._grid_btns[tag] = btn
+
+        self._cycle_list = tags
+        self._refresh_selected_bar()
+
+    def _update_chip(self, tag: str):
+        """Met à jour l'apparence d'un chip après toggle (sans reconstruire toute la zone)."""
+        btn = self._grid_btns.get(tag)
+        if btn is None:
+            return
+        is_sel = any(t.casefold() == tag.casefold() for t in self.current_tags)
+        color  = self._chip_color(tag)
+        label  = ("✓  " if is_sel else "") + tag
+        btn.setChecked(is_sel)
+        btn.setText(label)
+        btn.setStyleSheet(self._chip_style(color, is_sel))
+        w, h = self._chip_size(label)
+        btn.setFixedSize(w, h)
+        # Mettre à jour la taille stockée dans _chip_area
+        chips = self._chip_area._chips
+        idx = next((i for i, (wgt, _, __) in enumerate(chips) if wgt is btn), None)
+        if idx is not None:
+            chips[idx] = (btn, w, h)
+        self._chip_area._relayout()
+
+    # ── Tag toggle & selected bar ─────────────────────────────────────────────
+
+    def _toggle_tag(self, tag: str, add: bool):
+        if add:
+            if not any(t.casefold() == tag.casefold() for t in self.current_tags):
+                self.current_tags.append(tag)
+        else:
+            self.current_tags = [t for t in self.current_tags
+                                 if t.casefold() != tag.casefold()]
+        self._update_chip(tag)
+        self._refresh_selected_bar()
+
+    def _refresh_selected_bar(self):
+        while self._sel_layout.count():
+            item = self._sel_layout.takeAt(0)
+            if item and item.widget():
+                item.widget().deleteLater()
+
+        for tag in self.current_tags:
+            color = self._chip_color(tag)
+            pill  = QWidget()
+            pill.setStyleSheet(
+                f"background: {color}; border-radius: 10px; border: none;"
+            )
+            pl = QHBoxLayout(pill)
+            pl.setContentsMargins(8, 2, 4, 2)
+            pl.setSpacing(3)
+
+            lbl = QLabel(tag)
+            lbl.setStyleSheet(
+                "color: white; font-size: 11px; font-weight: 600;"
+                "background: transparent; border: none;"
+            )
+            lbl.setToolTip(tag)
+
+            rm = QPushButton("×")
+            rm.setFixedSize(16, 16)
+            rm.setStyleSheet(
+                "QPushButton { background: transparent; color: white; border: none;"
+                "  font-size: 14px; font-weight: bold; padding: 0; }"
+                "QPushButton:hover { color: #ffcccc; }"
+            )
+            rm.clicked.connect(lambda _, t=tag: self._remove_tag(t))
+
+            pl.addWidget(lbl)
+            pl.addWidget(rm)
+            self._sel_layout.addWidget(pill)
+
+        self._sel_layout.addStretch()
+
+    def _remove_tag(self, tag: str):
+        self.current_tags = [t for t in self.current_tags
+                             if t.casefold() != tag.casefold()]
+        self._update_chip(tag)
+        self._refresh_selected_bar()
+
+    # ── Action buttons ────────────────────────────────────────────────────────
+
+    def _on_add_new(self):
+        text, ok = QInputDialog.getText(self, "Nouveau tag", "Nom du tag :")
+        if not ok or not text.strip():
+            return
+        tag = text.strip()
+        if not any(t.casefold() == tag.casefold() for t in self.all_tags):
+            self.all_tags.append(tag)
+            self.all_tags.sort(key=str.casefold)
+        if not any(t.casefold() == tag.casefold() for t in self.current_tags):
+            self.current_tags.append(tag)
+        self._filter_by_letter(self._active_letter)
+
+    def _on_rename(self):
+        focused = self._focused_chip_tag()
+        if not focused:
+            QMessageBox.information(self, "Renommer",
+                "Cliquez d'abord sur un tag dans la liste pour le cibler.")
+            return
+        new_name, ok = QInputDialog.getText(
+            self, "Renommer le tag",
+            f"Nouveau nom pour \u00ab {focused} \u00bb :", text=focused)
+        if not ok or not new_name.strip() or new_name.strip() == focused:
+            return
+        new_name = new_name.strip()
+        self.all_tags     = [new_name if t.casefold() == focused.casefold() else t
+                             for t in self.all_tags]
+        self.current_tags = [new_name if t.casefold() == focused.casefold() else t
+                              for t in self.current_tags]
+        self.pending_rename = (focused, new_name)
+        self._last_clicked_tag = None
+        QMessageBox.information(self, "Renommer",
+            f"Le tag \u00ab {focused} \u00bb sera renomm\u00e9 en \u00ab {new_name} \u00bb\n"
+            "sur tous les documents lors de l'enregistrement.")
+        self._filter_by_letter(self._active_letter)
+
+    def _on_delete_global(self):
+        focused = self._focused_chip_tag()
+        if not focused:
+            QMessageBox.information(self, "Supprimer",
+                "Cliquez d'abord sur un tag dans la liste pour le cibler.")
+            return
+        reply = QMessageBox.question(
+            self, "Supprimer le tag",
+            f"Supprimer \u00ab {focused} \u00bb de TOUS les documents ?\n"
+            "Cette op\u00e9ration est irr\u00e9versible.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply != QMessageBox.Yes:
+            return
+        self.all_tags     = [t for t in self.all_tags
+                             if t.casefold() != focused.casefold()]
+        self.current_tags = [t for t in self.current_tags
+                             if t.casefold() != focused.casefold()]
+        self.pending_deletes.append(focused)
+        self._last_clicked_tag = None
+        self._filter_by_letter(self._active_letter)
+
+    def _focused_chip_tag(self) -> str | None:
+        # Priorité 1 : dernier chip cliqué (clic souris)
+        if self._last_clicked_tag and self._last_clicked_tag in self._grid_btns:
+            return self._last_clicked_tag
+        # Priorité 2 : focus clavier
+        for tag, btn in self._grid_btns.items():
+            if btn.hasFocus():
+                return tag
+        # Priorité 3 : position du cycle clavier
+        if self._cycle_list and 0 <= self._cycle_index < len(self._cycle_list):
+            return self._cycle_list[self._cycle_index]
+        return None
+
+    # ── Keyboard navigation ───────────────────────────────────────────────────
+
+    def keyPressEvent(self, event):
+        key_text = event.text().upper()
+
+        if key_text and key_text in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+            if key_text == self._active_letter and self._cycle_list:
+                self._cycle_index = (self._cycle_index + 1) % len(self._cycle_list)
+                target = self._cycle_list[self._cycle_index]
+                if target in self._grid_btns:
+                    self._grid_btns[target].setFocus()
+            else:
+                self._filter_by_letter(key_text)
+                if self._cycle_list:
+                    self._cycle_index = 0
+                    if self._cycle_list[0] in self._grid_btns:
+                        self._grid_btns[self._cycle_list[0]].setFocus()
+
+        elif event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            for tag, btn in self._grid_btns.items():
+                if btn.hasFocus():
+                    self._toggle_tag(tag, not btn.isChecked())
+                    if self._cycle_list and self._cycle_index < len(self._cycle_list) - 1:
+                        self._cycle_index += 1
+                        nxt = self._cycle_list[self._cycle_index]
+                        if nxt in self._grid_btns:
+                            self._grid_btns[nxt].setFocus()
+                    break
+
+        elif event.key() == Qt.Key_Escape:
+            self.reject()
+        else:
+            super().keyPressEvent(event)
+
+
 class TagWidget(QFrame):
     def __init__(self, text, remove_callback):
         super().__init__()
@@ -5577,21 +6826,18 @@ from PySide6.QtGui import QPainter, QFontMetrics, QLinearGradient, QColor, QBrus
 from PySide6.QtCore import Signal
 
 class ScrollingItemDelegate(QStyledItemDelegate):
-    def __init__(self, tree_widget):
+    def __init__(self, tree_widget, accent_color: str = "#007BFF"):
         super().__init__(tree_widget)
         self.tree_widget = tree_widget
+        self.accent_color = accent_color
         self.scroll_offset = 0
         self.scroll_timer = QTimer()
         self.scroll_timer.timeout.connect(self.update_scroll)
         self.hovered_index = None
         self.scroll_speed = 2
 
-        # Ajouter un attribut pour vérifier si le widget a été supprimé
         self.tree_widget_deleted = False
-
-        # Connexion à l'événement de destruction de QTreeWidget
         self.tree_widget.destroyed.connect(self.on_widget_deleted)
-
         tree_widget.viewport().installEventFilter(self)
         tree_widget.setMouseTracking(True)
 
@@ -5646,55 +6892,82 @@ class ScrollingItemDelegate(QStyledItemDelegate):
 
     def paint(self, painter, option, index):
         painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+
         text = index.data()
         if not text:
             painter.restore()
             return
 
-        rect = option.rect
-        icon = index.model().data(index, Qt.DecorationRole)
-        fm = QFontMetrics(option.font)
+        rect        = option.rect
+        icon        = index.model().data(index, Qt.DecorationRole)
+        fm          = QFontMetrics(option.font)
+        is_selected = bool(option.state & QStyle.State_Selected)
+        is_hovered  = (index == self.hovered_index) and not is_selected
 
-        icon_size = 24
-        icon_padding = 6
-        icon_rect = QRectF(rect.left() + 4, rect.top() + (rect.height() - icon_size) / 2, icon_size, icon_size)
-        text_x = icon_rect.right() + icon_padding
-        text_width = fm.horizontalAdvance(text)
-        available_width = rect.width() - (text_x - rect.left()) - 8
+        accent = QColor(self.accent_color)
 
-        # Sélection personnalisée (léger fond bleu clair)
-        if option.state & QStyle.State_Selected:
-            selection_rect = QRectF(rect)
+        # Fond et indicateur gauche
+        bg_rect = QRectF(rect).adjusted(3, 1, -3, -1)
+
+        if is_selected:
+            # Fond pleine largeur en accent très transparent
+            bg = QColor(accent); bg.setAlpha(22)
+            painter.setBrush(bg)
             painter.setPen(Qt.NoPen)
-            painter.drawRect(selection_rect)
+            painter.drawRoundedRect(bg_rect, 6, 6)
+            # Barre verticale gauche accent opaque (4 px)
+            painter.setBrush(accent)
+            bar_rect = QRectF(rect.left() + 3, rect.top() + 5, 4, rect.height() - 10)
+            painter.drawRoundedRect(bar_rect, 2, 2)
+            text_color = accent
 
-        # Icône
+        elif is_hovered:
+            bg = QColor(accent); bg.setAlpha(12)
+            painter.setBrush(bg)
+            painter.setPen(Qt.NoPen)
+            painter.drawRoundedRect(bg_rect, 6, 6)
+            text_color = option.palette.text().color()
+        else:
+            text_color = option.palette.text().color()
+
+        # Icone
+        icon_size = 22
+        icon_x    = rect.left() + 14
+        icon_rect = QRectF(icon_x, rect.top() + (rect.height() - icon_size) / 2,
+                           icon_size, icon_size)
+        text_x = icon_rect.right() + 5
+
         if isinstance(icon, QIcon):
-            icon.paint(painter, int(icon_rect.left()), int(icon_rect.top()), icon_size, icon_size)
+            icon.paint(painter, int(icon_rect.left()), int(icon_rect.top()),
+                       icon_size, icon_size)
 
-        # Texte défilant ou statique
-        painter.setPen(option.palette.text().color())
+        # Texte (defilant si trop long)
+        text_width      = fm.horizontalAdvance(text)
+        available_width = rect.right() - text_x - 8
+        text_y = rect.top() + (rect.height() + fm.ascent() - fm.descent()) / 2
+
+        if is_selected:
+            font = option.font
+            font.setWeight(QFont.Weight.DemiBold)
+            painter.setFont(font)
+
+        painter.setPen(text_color)
+
         if index == self.hovered_index and text_width > available_width:
             painter.setClipRect(QRectF(text_x, rect.top(), available_width, rect.height()))
-            painter.drawText(QPointF(text_x - self.scroll_offset, rect.top() + (rect.height() + fm.ascent() - fm.descent()) / 2), text)
-
-            # Dégradé gauche
-            grad_left = QLinearGradient(text_x, 0, text_x + 20, 0)
-            grad_left.setColorAt(0, QColor(option.palette.window().color()))
-            color = QColor(option.palette.window().color())  # Copie la couleur existante
-            color.setAlpha(0)  # Rend la couleur transparente
-            grad_left.setColorAt(1, color)
-            painter.fillRect(QRectF(text_x, rect.top(), 20, rect.height()), QBrush(grad_left))
-
-            # Dégradé droit
-            grad_right = QLinearGradient(text_x + available_width - 20, 0, text_x + available_width, 0)
-            transparent = QColor(option.palette.window().color())
-            transparent.setAlpha(0)
-            grad_right.setColorAt(0, transparent)
-            grad_right.setColorAt(1, QColor(option.palette.window().color()))
-            painter.fillRect(QRectF(text_x + available_width - 20, rect.top(), 20, rect.height()), QBrush(grad_right))
+            painter.drawText(QPointF(text_x - self.scroll_offset, text_y), text)
+            bg_base = option.palette.base().color()
+            c0 = QColor(bg_base); c0.setAlpha(240)
+            c1 = QColor(bg_base); c1.setAlpha(0)
+            grad_l = QLinearGradient(text_x, 0, text_x + 20, 0)
+            grad_l.setColorAt(0, c0); grad_l.setColorAt(1, c1)
+            painter.fillRect(QRectF(text_x, rect.top(), 20, rect.height()), QBrush(grad_l))
+            grad_r = QLinearGradient(text_x + available_width - 20, 0, text_x + available_width, 0)
+            grad_r.setColorAt(0, c1); grad_r.setColorAt(1, c0)
+            painter.fillRect(QRectF(text_x + available_width - 20, rect.top(), 20, rect.height()), QBrush(grad_r))
         else:
-            painter.drawText(QPointF(text_x, rect.top() + (rect.height() + fm.ascent() - fm.descent()) / 2), text)
+            painter.drawText(QPointF(text_x, text_y), text)
 
         painter.restore()
 
@@ -5923,11 +7196,18 @@ class FlowLayout(QLayout):
         return self.minimumSize()
 
     def minimumSize(self):
-        size = QSize()
-        for item in self.item_list:
-            size = size.expandedTo(item.minimumSize())
-        size += QSize(2 * self.contentsMargins().top(), 2 * self.contentsMargins().top())
-        return size
+        # Calculer la hauteur réelle en fonction de la largeur disponible
+        parent = self.parentWidget()
+        if parent and parent.width() > 0:
+            h = self._do_layout(QPoint(0, 0), parent.width(), test_only=True)
+        else:
+            # Fallback : hauteur pour 1 ligne de tags
+            max_item_h = 0
+            for item in self.item_list:
+                max_item_h = max(max_item_h, item.minimumSize().height())
+            h = max(max_item_h, 32)
+        margins = self.contentsMargins()
+        return QSize(50, h + margins.top() + margins.bottom())
 
     def _do_layout(self, position, width, test_only=False):
         x, y = position.x(), position.y()

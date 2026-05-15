@@ -1,34 +1,39 @@
 import sys
 import os
-import warnings
 
-# ── Supprimer les warnings bénins des bibliothèques tierces ───────────────────
-warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
-warnings.filterwarnings("ignore", category=DeprecationWarning)
-
-# Rediriger les erreurs MuPDF vers /dev/null (colorspace ICC non standard, etc.)
-import fitz
-fitz.TOOLS.mupdf_warnings()
-fitz.TOOLS.reset_mupdf_warnings()
-
-# ── Fix QtWebEngine sur Windows ───────────────────────────────────────────────
-# Désactive le sandbox et le GPU qui causent des processus zombies sur
-# certaines configurations Windows (crash HTML/DOCX/ODT + processus bloqués)
-if sys.platform == "win32":
-    os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS",
-                          "--no-sandbox --disable-gpu --disable-gpu-compositing")
-    os.environ.setdefault("QTWEBENGINE_DISABLE_SANDBOX", "1")
-
-from PySide6.QtWidgets import QApplication, QStyleFactory
+from PySide6.QtWidgets import QApplication, QStyleFactory, QMessageBox
 from PySide6.QtGui     import QIcon
+from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
 import config
 
 from views.main_window import MainWindow
 from database.reindex import scan_and_insert_files
 
+_SERVER_NAME = "LibreGED_SingleInstance"
+
+def _is_already_running() -> bool:
+    """
+    Tente de se connecter à un serveur QLocalSocket existant.
+    Si la connexion réussit, une autre instance tourne déjà.
+    """
+    socket = QLocalSocket()
+    socket.connectToServer(_SERVER_NAME)
+    if socket.waitForConnected(300):
+        socket.disconnectFromServer()
+        return True
+    return False
+
+def _create_instance_server() -> QLocalServer:
+    """Crée le serveur d'instance unique (écoute les connexions entrantes)."""
+    server = QLocalServer()
+    # Nettoyer un serveur fantôme (crash précédent)
+    QLocalServer.removeServer(_SERVER_NAME)
+    server.listen(_SERVER_NAME)
+    return server
+
 def main():
-    # On récupère tout depuis config.py
+    # On rÃ©cupÃ¨re tout depuis config.py
     db_path   = config.DB_PATH
     files_dir = config.FILES_DIR
     langs     = config.LANGUAGES_PATH
@@ -42,11 +47,22 @@ def main():
 
     # Lancement de l'UI
     app = QApplication(sys.argv)
+
+    # ── Instance unique ────────────────────────────────────────────────
+    if _is_already_running():
+        QMessageBox.information(
+            None, "LibreGED",
+            "LibreGED est déjà en cours d'exécution."
+        )
+        sys.exit(0)
+    instance_server = _create_instance_server()   # maintenu en vie pendant l'exécution
+    # ──────────────────────────────────────────────────────────────────
+
     favicon = config.ASSETS_DIR / "icons" / "favicon.ico"
     if favicon.exists():
         app.setWindowIcon(QIcon(str(favicon)))
     QApplication.setStyle(QStyleFactory.create("Fusion"))
-
+    
     window = MainWindow()
     window.show()
     sys.exit(app.exec())

@@ -219,7 +219,11 @@
     "find_prev": "Précédent",
     "find_next": "Suivant",
     "find_found": "Trouvé",
-    "find_not_found": "Introuvable"
+    "find_not_found": "Introuvable",
+    "btn_cancel": "Annuler",
+    "btn_ok": "OK",
+    "import_action_question": "Choisissez une action :",
+    "import_move": "Déplacer"
   },
   "en": {
     "about_title": "About LibreGED",
@@ -441,7 +445,11 @@
     "find_prev": "Previous",
     "find_next": "Next",
     "find_found": "Found",
-    "find_not_found": "Not found"
+    "find_not_found": "Not found",
+    "btn_cancel": "Cancel",
+    "btn_ok": "OK",
+    "import_action_question": "Choose an action:",
+    "import_move": "Move"
   },
   "de": {
     "about_title": "Über LibreGED",
@@ -663,7 +671,11 @@
     "find_prev": "Vorherige",
     "find_next": "Nächste",
     "find_found": "Gefunden",
-    "find_not_found": "Nicht gefunden"
+    "find_not_found": "Nicht gefunden",
+    "btn_cancel": "Abbrechen",
+    "btn_ok": "OK",
+    "import_action_question": "Aktion wählen:",
+    "import_move": "Verschieben"
   },
   "it": {
     "about_title": "Informazioni su LibreGED",
@@ -885,7 +897,11 @@
     "find_prev": "Precedente",
     "find_next": "Successivo",
     "find_found": "Trovato",
-    "find_not_found": "Non trovato"
+    "find_not_found": "Non trovato",
+    "btn_cancel": "Annulla",
+    "btn_ok": "OK",
+    "import_action_question": "Scegli un'azione:",
+    "import_move": "Sposta"
   },
   "es": {
     "about_title": "Acerca de LibreGED",
@@ -1107,7 +1123,11 @@
     "find_prev": "Anterior",
     "find_next": "Siguiente",
     "find_found": "Encontrado",
-    "find_not_found": "No encontrado"
+    "find_not_found": "No encontrado",
+    "btn_cancel": "Cancelar",
+    "btn_ok": "OK",
+    "import_action_question": "Elige una acción:",
+    "import_move": "Mover"
   },
   "nl": {
     "about_title": "Over LibreGED",
@@ -1329,7 +1349,11 @@
     "find_prev": "Vorige",
     "find_next": "Volgende",
     "find_found": "Gevonden",
-    "find_not_found": "Niet gevonden"
+    "find_not_found": "Niet gevonden",
+    "btn_cancel": "Annuleren",
+    "btn_ok": "OK",
+    "import_action_question": "Kies een actie:",
+    "import_move": "Verplaatsen"
   },
   "pt": {
     "about_title": "Sobre o LibreGED",
@@ -1551,7 +1575,11 @@
     "find_prev": "Anterior",
     "find_next": "Seguinte",
     "find_found": "Encontrado",
-    "find_not_found": "Não encontrado"
+    "find_not_found": "Não encontrado",
+    "btn_cancel": "Cancelar",
+    "btn_ok": "OK",
+    "import_action_question": "Escolha uma ação:",
+    "import_move": "Mover"
   },
   "pl": {
     "about_title": "O LibreGED",
@@ -1773,7 +1801,11 @@
     "find_prev": "Poprzedni",
     "find_next": "Następny",
     "find_found": "Znaleziono",
-    "find_not_found": "Nie znaleziono"
+    "find_not_found": "Nie znaleziono",
+    "btn_cancel": "Anuluj",
+    "btn_ok": "OK",
+    "import_action_question": "Wybierz akcję:",
+    "import_move": "Przenieś"
   },
   "sw": {
     "about_title": "Om LibreGED",
@@ -1995,7 +2027,11 @@
     "find_prev": "Föregående",
     "find_next": "Nästa",
     "find_found": "Hittad",
-    "find_not_found": "Hittades inte"
+    "find_not_found": "Hittades inte",
+    "btn_cancel": "Avbryt",
+    "btn_ok": "OK",
+    "import_action_question": "Välj en åtgärd:",
+    "import_move": "Flytta"
   },
   "dk": {
     "about_title": "Om LibreGED",
@@ -2217,7 +2253,11 @@
     "find_prev": "Forrige",
     "find_next": "Næste",
     "find_found": "Fundet",
-    "find_not_found": "Ikke fundet"
+    "find_not_found": "Ikke fundet",
+    "btn_cancel": "Annuller",
+    "btn_ok": "OK",
+    "import_action_question": "Vælg en handling:",
+    "import_move": "Flyt"
   },
   "fi": {
     "about_title": "Tietoja LibreGEDistä",
@@ -2439,7 +2479,11 @@
     "find_prev": "Edellinen",
     "find_next": "Seuraava",
     "find_found": "Löytyi",
-    "find_not_found": "Ei löytynyt"
+    "find_not_found": "Ei löytynyt",
+    "btn_cancel": "Peruuta",
+    "btn_ok": "OK",
+    "import_action_question": "Valitse toiminto:",
+    "import_move": "Siirrä"
   },
   "gr": {
     "about_title": "Σχετικά με το LibreGED",
@@ -2661,7 +2705,11 @@
     "find_prev": "Προηγούμενο",
     "find_next": "Επόμενο",
     "find_found": "Βρέθηκε",
-    "find_not_found": "Δεν βρέθηκε"
+    "find_not_found": "Δεν βρέθηκε",
+    "btn_cancel": "Ακύρωση",
+    "btn_ok": "OK",
+    "import_action_question": "Επιλέξτε ενέργεια:",
+    "import_move": "Μετακίνηση"
   },
   "cz": {
     "about_title": "O aplikaci LibreGED",
@@ -2883,6 +2931,10 @@
     "find_prev": "Předchozí",
     "find_next": "Další",
     "find_found": "Nalezeno",
-    "find_not_found": "Nenalezeno"
+    "find_not_found": "Nenalezeno",
+    "btn_cancel": "Zrušit",
+    "btn_ok": "OK",
+    "import_action_question": "Vyberte akci:",
+    "import_move": "Přesunout"
   }
 }
