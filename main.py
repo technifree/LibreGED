@@ -2,46 +2,18 @@ import sys
 import os
 
 # ══════════════════════════════════════════════════════════════════════════════
-# FIX PARSEC / VIRTUAL DISPLAY — forcer SwiftShader via QWebEngineSettings
+# FIX WINDOWS — Parsec/VirtualDisplay crash (SharedImageBackingFactory)
+# Appliqué UNIQUEMENT sur Windows pour ne pas casser Linux/macOS
 # ══════════════════════════════════════════════════════════════════════════════
-# Cause confirmée : Parsec Virtual Display Adapter (WDDM 1.3) présent sur les
-# deux PC en échec. Chromium/ANGLE sélectionne ce display virtuel sans OpenGL
-# réel → SharedImageBackingFactory failed → crash.
-#
-# Solution : QtWebEngineQuick.initialize() avec les flags AVANT QApplication.
-# C'est la méthode documentée PyInstaller+QtWebEngine pour passer des flags
-# au processus QtWebEngineProcess.exe.
-# ══════════════════════════════════════════════════════════════════════════════
-
-# Ces flags DOIVENT être définis avant tout import PySide6
-os.environ["QTWEBENGINE_DISABLE_SANDBOX"] = "1"
-os.environ["QTWEBENGINE_CHROMIUM_FLAGS"]  = (
-    "--disable-gpu "
-    "--disable-gpu-compositing "
-    "--use-gl=swiftshader "
-    "--disable-features=Vulkan,UseSkiaRenderer "
-    "--in-process-gpu"
-)
-
-# sys.argv injection également (double filet)
-_GPU_FLAGS = [
-    "--disable-gpu",
-    "--disable-gpu-compositing",
-    "--use-gl=swiftshader",
-    "--disable-features=Vulkan,UseSkiaRenderer",
-    "--in-process-gpu",
-]
-for _f in _GPU_FLAGS:
-    if _f not in sys.argv:
-        sys.argv.append(_f)
-
-# QtWebEngineQuick.initialize() : méthode officielle pour PyInstaller
-# Doit être appelé AVANT QApplication
-try:
-    from PySide6.QtWebEngineQuick import QtWebEngineQuick
-    QtWebEngineQuick.initialize()
-except ImportError:
-    pass   # Module optionnel selon la version de PySide6
+if sys.platform == "win32":
+    # Ces flags DOIVENT être définis avant tout import PySide6/Qt
+    os.environ["QTWEBENGINE_DISABLE_SANDBOX"] = "1"
+    os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
+        "--disable-gpu "
+        "--disable-gpu-compositing "
+        "--use-gl=swiftshader "
+        "--disable-features=Vulkan,UseSkiaRenderer"
+    )
 
 from PySide6.QtWidgets import QApplication, QStyleFactory, QMessageBox
 from PySide6.QtGui     import QIcon
@@ -51,7 +23,7 @@ from views.main_window import MainWindow
 from database.reindex  import scan_and_insert_files
 
 # ── Instance unique ────────────────────────────────────────────────────────────
-_MUTEX_NAME = "LibreGED_SingleInstance_Mutex"
+_MUTEX_NAME   = "LibreGED_SingleInstance_Mutex"
 _mutex_handle = None
 
 def _acquire_lock() -> bool:
