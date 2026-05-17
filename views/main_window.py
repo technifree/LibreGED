@@ -2489,11 +2489,13 @@ class MainWindow(QMainWindow):
             self.image_preview_label.clear()
             self.image_scroll.setVisible(False)
 
-        # Nettoyer le QWebEngineView s'il existe, sans le supprimer
+        # Nettoyer le QWebEngineView : stopper le chargement en cours
+        # NE PAS appeler hide() — show_html_preview gère la visibilité via
+        # preview_stack.setCurrentWidget(). Un hide() ici rendrait le widget
+        # invisible même après setCurrentWidget(), causant l'écran blanc.
         if hasattr(self, 'html_preview') and self.html_preview is not None:
             try:
-                self.html_preview.setHtml("")  # Efface le contenu HTML
-                self.html_preview.hide()       # Masque le widget
+                self.html_preview.stop()   # Arrêter tout chargement en cours
             except RuntimeError as e:
                 print(f"[AVERTISSEMENT] html_preview inaccessible : {e}")
 
@@ -4747,6 +4749,7 @@ class MainWindow(QMainWindow):
         """
         if not self.html_preview:
             return
+        self.html_preview.show()   # garantit la visibilité après un éventuel hide()
         local = url.toLocalFile()
         if local:
             suffix = local.rsplit('.', 1)[-1].lower() if '.' in local else ''
@@ -4773,6 +4776,7 @@ class MainWindow(QMainWindow):
         if not WEB_ENGINE_AVAILABLE or not self.html_preview:
             self.show_text_preview(html)
             return
+        self.html_preview.show()   # garantit la visibilité après un éventuel hide()
         self._webview_set_html(html)
         self.preview_stack.setCurrentWidget(self.html_preview)
 
