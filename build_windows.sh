@@ -38,7 +38,24 @@ echo " Branche: $BRANCH"
 echo "══════════════════════════════════════════════"
 echo ""
 
-# Déclencher le workflow
+# ── Étape 0 : commit + push des changements locaux ────────────────────────────
+echo "[0/3] Synchronisation du code source..."
+git add -A
+
+if git diff --cached --quiet; then
+    echo "      (aucun changement local à committer)"
+else
+    # Utiliser le message fourni en 2e argument, sinon un message automatique
+    COMMIT_MSG="${2:-Build Windows — $(date +'%Y-%m-%d %H:%M')}"
+    git commit -m "$COMMIT_MSG"
+    echo "      Commit : $COMMIT_MSG"
+fi
+
+git pull --rebase origin "$BRANCH" --quiet
+git push origin "$BRANCH" --quiet
+echo "      ✓ Code source à jour sur GitHub (branche $BRANCH)"
+echo ""
+
 echo "[1/3] Déclenchement du workflow $WORKFLOW..."
 gh workflow run "$WORKFLOW" --ref "$BRANCH"
 sleep 5  # laisser GitHub enregistrer le run
