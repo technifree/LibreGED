@@ -4719,31 +4719,54 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.show_text_preview(f"Erreur lecture EML : {e}")
 
-    def _webview_set_html(self, html: str):
+    def _webview_set_html(self, html: str, base_url: QUrl = None):
         """
-        Charge du HTML dans le QWebEngineView unique en forçant le rechargement.
-        Passe d'abord par about:blank pour garantir un rendu propre même si le
-        contenu est identique au précédent (comportement SwiftShader/Windows).
+        Charge du HTML dans le QWebEngineView unique.
+        Ajoute un timestamp invisible pour forcer QWebEngine à toujours
+        re-rendre, même si le contenu est identique au précédent.
+        Fonctionne sans timer (synchrone) — pas de race condition possible.
         """
-        self.html_preview.setHtml("")
-        QTimer.singleShot(30, lambda: (
-            self.html_preview.setHtml(html)
-            if self.html_preview else None
-        ))
-
-    def _webview_load_url(self, url):
-        """
-        Charge une URL dans le QWebEngineView unique en forçant le rechargement
-        même si l'URL est identique à la précédente.
-        """
-        if self.html_preview.url() == url:
-            self.html_preview.setHtml("")
-            QTimer.singleShot(30, lambda: (
-                self.html_preview.load(url)
-                if self.html_preview else None
-            ))
+        if not self.html_preview:
+            return
+        import time
+        ts = int(time.time() * 1000)
+        # Injecter un élément invisible unique → WebEngine voit toujours du "nouveau" contenu
+        forced = html + f'<span id="_ged_r{ts}" style="display:none"></span>'
+        if base_url:
+            self.html_preview.setHtml(forced, base_url)
         else:
-            self.html_preview.load(url)
+            self.html_preview.setHtml(forced)
+
+    def _webview_load_url(self, url: QUrl):
+        """
+        Charge un fichier local dans le QWebEngineView unique.
+        Lit le contenu et utilise setHtml() avec la base URL du fichier,
+        ce qui garantit le rechargement même si l'URL est identique,
+        tout en conservant la résolution des ressources relatives (images, CSS).
+        Pour MHTML : utilise setUrl avec un fragment unique.
+        """
+        if not self.html_preview:
+            return
+        local = url.toLocalFile()
+        if local:
+            suffix = local.rsplit('.', 1)[-1].lower() if '.' in local else ''
+            if suffix in ('mhtml', 'mht'):
+                # MHTML : format binaire multipart, setHtml ne fonctionne pas
+                # → forcer via fragment unique dans l'URL
+                import time
+                furl = QUrl(url)
+                furl.setFragment(f"_r{int(time.time()*1000)}")
+                self.html_preview.load(furl)
+                return
+            try:
+                with open(local, 'r', encoding='utf-8', errors='ignore') as f:
+                    content = f.read()
+                self._webview_set_html(content, url)
+                return
+            except Exception:
+                pass
+        # Fallback (URL non-locale)
+        self.html_preview.load(url)
 
     def show_html_preview(self, html: str):
         """Affiche du HTML dans le QWebEngineView UNIQUE (jamais recréé)."""
