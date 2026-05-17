@@ -2489,13 +2489,22 @@ class MainWindow(QMainWindow):
             self.image_preview_label.clear()
             self.image_scroll.setVisible(False)
 
+        # Fermer la barre Ctrl+F si ouverte (les highlights ne s'appliquent plus)
+        if hasattr(self, 'search_bar_widget') and self.search_bar_widget.isVisible():
+            self.search_bar_widget.setVisible(False)
+            self.find_input.clear()
+            self.find_count_label.setText("")
+            self._xlsx_find_cache = None
+            self._xlsx_find_index = -1
+
         # Nettoyer le QWebEngineView : stopper le chargement en cours
         # NE PAS appeler hide() — show_html_preview gère la visibilité via
         # preview_stack.setCurrentWidget(). Un hide() ici rendrait le widget
         # invisible même après setCurrentWidget(), causant l'écran blanc.
         if hasattr(self, 'html_preview') and self.html_preview is not None:
             try:
-                self.html_preview.stop()   # Arrêter tout chargement en cours
+                self.html_preview.stop()             # Arrêter tout chargement en cours
+                self.html_preview.page().findText("") # Effacer les surlignages Ctrl+F
             except RuntimeError as e:
                 print(f"[AVERTISSEMENT] html_preview inaccessible : {e}")
 
