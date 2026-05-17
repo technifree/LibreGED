@@ -1,4 +1,4 @@
-# LibreGED v2.9.1 - 12/05/2026
+# LibreGED v2.9.1 - 17/05/2026
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QPushButton, QLabel, QLineEdit, QTextEdit,
@@ -1714,7 +1714,7 @@ class MainWindow(QMainWindow):
                 if WEB_ENGINE_AVAILABLE and self.html_preview:
                     try:
                         self.html_preview.setVisible(True)
-                        self.html_preview.load(QUrl.fromLocalFile(str(doc_path)))
+                        self._webview_load_url(QUrl.fromLocalFile(str(doc_path)))
                     except Exception as e:
                         self.show_text_preview(self.t("error_loading_html").format(error=str(e)))
                 else:
@@ -2336,7 +2336,7 @@ class MainWindow(QMainWindow):
 
                 # Réutiliser l'instance unique html_preview
                 if self.html_preview:
-                    self.html_preview.load(QUrl.fromLocalFile(tmp.name))
+                    self._webview_load_url(QUrl.fromLocalFile(tmp.name))
                     self.preview_stack.setCurrentWidget(self.html_preview)
 
             else:
@@ -3593,7 +3593,7 @@ class MainWindow(QMainWindow):
 
                     if WEB_ENGINE_AVAILABLE and self.html_preview:
                         # même logique que pour EPUB : supprimer ancien fichier et recréer html_preview
-                        self.html_preview.load(QUrl.fromLocalFile(tmp.name))
+                        self._webview_load_url(QUrl.fromLocalFile(tmp.name))
                         self.show_preview_widget(self.html_preview)
                     else:
                         self.show_text_preview(self.t("disabled_html_preview"))
@@ -4342,7 +4342,7 @@ class MainWindow(QMainWindow):
             # === HTML ===
             if ext in [".html", ".htm"]:
                 if WEB_ENGINE_AVAILABLE and self.html_preview:
-                    self.html_preview.load(QUrl.fromLocalFile(str(doc_path)))
+                    self._webview_load_url(QUrl.fromLocalFile(str(doc_path)))
                     self.preview_stack.setCurrentWidget(self.html_preview)
                 else:
                     with open(win_path(doc_path), "r", encoding="utf-8", errors="ignore") as fhtml:
@@ -4417,7 +4417,7 @@ class MainWindow(QMainWindow):
             elif ext == ".docx":
                 html = self.show_docx_preview(doc_path)
                 if html and WEB_ENGINE_AVAILABLE and self.html_preview:
-                    self.html_preview.setHtml(html)
+                    self._webview_set_html(html)
                     self.preview_stack.setCurrentWidget(self.html_preview)
                 else:
                     self.show_text_preview(self.t("docx_empty_or_webengine_unavailable"))
@@ -4438,7 +4438,7 @@ class MainWindow(QMainWindow):
             elif ext == ".odt":
                 html = odf_utils.odf_to_html(doc_path)
                 if html and WEB_ENGINE_AVAILABLE and self.html_preview:
-                    self.html_preview.setHtml(html)
+                    self._webview_set_html(html)
                     self.preview_stack.setCurrentWidget(self.html_preview)
                 else:
                     self.show_text_preview(self.t("odt_empty_or_webengine_unavailable"))
@@ -4533,7 +4533,7 @@ class MainWindow(QMainWindow):
                 self.html_preview.page().urlChanged.disconnect()
             except Exception:
                 pass
-            self.html_preview.setHtml(html)
+            self._webview_set_html(html)
             self.html_preview.page().urlChanged.connect(self._on_unsupported_url_changed)
             self.preview_stack.setCurrentWidget(self.html_preview)
         else:
@@ -4663,7 +4663,7 @@ class MainWindow(QMainWindow):
         if not WEB_ENGINE_AVAILABLE or not self.html_preview:
             self.show_text_preview(self.t("error_webengine_unavailable"))
             return
-        self.html_preview.setUrl(QUrl.fromLocalFile(str(doc_path)))
+        self._webview_load_url(QUrl.fromLocalFile(str(doc_path)))
         self.preview_stack.setCurrentWidget(self.html_preview)
 
     def show_eml_preview(self, doc_path):
@@ -4719,12 +4719,38 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.show_text_preview(f"Erreur lecture EML : {e}")
 
+    def _webview_set_html(self, html: str):
+        """
+        Charge du HTML dans le QWebEngineView unique en forçant le rechargement.
+        Passe d'abord par about:blank pour garantir un rendu propre même si le
+        contenu est identique au précédent (comportement SwiftShader/Windows).
+        """
+        self.html_preview.setHtml("")
+        QTimer.singleShot(30, lambda: (
+            self.html_preview.setHtml(html)
+            if self.html_preview else None
+        ))
+
+    def _webview_load_url(self, url):
+        """
+        Charge une URL dans le QWebEngineView unique en forçant le rechargement
+        même si l'URL est identique à la précédente.
+        """
+        if self.html_preview.url() == url:
+            self.html_preview.setHtml("")
+            QTimer.singleShot(30, lambda: (
+                self.html_preview.load(url)
+                if self.html_preview else None
+            ))
+        else:
+            self.html_preview.load(url)
+
     def show_html_preview(self, html: str):
         """Affiche du HTML dans le QWebEngineView UNIQUE (jamais recréé)."""
         if not WEB_ENGINE_AVAILABLE or not self.html_preview:
             self.show_text_preview(html)
             return
-        self.html_preview.setHtml(html)
+        self._webview_set_html(html)
         self.preview_stack.setCurrentWidget(self.html_preview)
 
     def show_ods_preview(self, rel_path):
@@ -4770,7 +4796,7 @@ class MainWindow(QMainWindow):
         if not WEB_ENGINE_AVAILABLE or not self.html_preview:
             self.show_text_preview(self.t("disabled_html_preview"))
             return
-        self.html_preview.load(QUrl.fromLocalFile(str(file_path)))
+        self._webview_load_url(QUrl.fromLocalFile(str(file_path)))
         self.preview_stack.setCurrentWidget(self.html_preview)
 
     def show_svg_preview(self, rel_path):
@@ -4795,7 +4821,7 @@ class MainWindow(QMainWindow):
             svg {{ max-width:100%; max-height:100%; }}
         </style></head><body>{svg_content}</body></html>"""
 
-        self.html_preview.setHtml(html)
+        self._webview_set_html(html)
         self.preview_stack.setCurrentWidget(self.html_preview)
         self.zoom_controls_widget.show()
         self.prev_page_button.hide()
