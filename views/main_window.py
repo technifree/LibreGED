@@ -1,4 +1,4 @@
-# LibreGED v2.8.2 - 12/05/2026
+# LibreGED v2.9.1 - 12/05/2026
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QPushButton, QLabel, QLineEdit, QTextEdit,
@@ -1527,7 +1527,7 @@ class MainWindow(QMainWindow):
         self.setWindowIcon(flag_icon)
 
         # 2) on assemble le texte
-        title = "LibreGED v.2.8.2"
+        title = "LibreGED v.2.9.1"
         if filename:
             title += f" – {filename}"
         self.setWindowTitle(title)
