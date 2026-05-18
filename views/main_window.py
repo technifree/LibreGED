@@ -1,4 +1,4 @@
-# LibreGED v2.9.0 - 15/05/2026
+# LibreGED v2.9.1 - 18/05/2026
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QPushButton, QLabel, QLineEdit, QTextEdit,
@@ -1518,7 +1518,7 @@ class MainWindow(QMainWindow):
         self.setWindowIcon(flag_icon)
 
         # 2) on assemble le texte
-        title = "LibreGED v.2.9.0"
+        title = "LibreGED v.2.9.1"
         if filename:
             title += f" – {filename}"
         self.setWindowTitle(title)
@@ -1682,7 +1682,20 @@ class MainWindow(QMainWindow):
         self.update_file_info_label_state(False)
 
         if self.html_preview:
-            self.html_preview.hide()
+            try:
+                self.html_preview.page().findText("")  # efface les surlignages Ctrl+F
+            except Exception:
+                pass
+
+        # Fermer la barre Ctrl+F si ouverte
+        if hasattr(self, 'search_bar_widget') and self.search_bar_widget.isVisible():
+            self.search_bar_widget.setVisible(False)
+            if hasattr(self, 'find_input'):
+                self.find_input.clear()
+            if hasattr(self, 'find_count_label'):
+                self.find_count_label.setText("")
+            self._xlsx_find_cache = None
+            self._xlsx_find_index = -1
 
         display_text = item.text()
         
@@ -2484,13 +2497,23 @@ class MainWindow(QMainWindow):
             self.image_preview_label.clear()
             self.image_scroll.setVisible(False)
 
-        # Nettoyer le QWebEngineView s'il existe, sans le supprimer
+        # Nettoyer le QWebEngineView : effacer highlights et stopper le chargement
         if hasattr(self, 'html_preview') and self.html_preview is not None:
             try:
-                self.html_preview.setHtml("")  # Efface le contenu HTML
-                self.html_preview.hide()       # Masque le widget
+                self.html_preview.page().findText("")  # efface les surlignages Ctrl+F
+                self.html_preview.stop()
             except RuntimeError as e:
                 print(f"[AVERTISSEMENT] html_preview inaccessible : {e}")
+
+        # Fermer la barre Ctrl+F si ouverte
+        if hasattr(self, 'search_bar_widget') and self.search_bar_widget.isVisible():
+            self.search_bar_widget.setVisible(False)
+            if hasattr(self, 'find_input'):
+                self.find_input.clear()
+            if hasattr(self, 'find_count_label'):
+                self.find_count_label.setText("")
+            self._xlsx_find_cache = None
+            self._xlsx_find_index = -1
 
         # Masquer les contrôles de zoom et les boutons de navigation
         self.zoom_controls_widget.hide()

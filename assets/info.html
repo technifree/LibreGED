@@ -28,14 +28,14 @@
             <div style="text-align: center">
                 <!-- <img src="../assets/proxy-image.png" alt="Technifree" class="img-fluid logo" style="width: 20%;">-->
                 <h1><b>LibreGED</b></h1>
-                <p>Version 2.9.0</p>
+                <p>Version 2.9.1</p>
             </div>
         </div>
         <div class="content">
             <div style="text-align: center">
                 <h3>Gestionnaire de fichier simple pour GED personnelle</h3>
                     <br>
-                version du: <b>15/05/2026</b><br>
+                version du: <b>18/05/2026</b><br>
                     <br>
                 <span>site web de l'application : <a href="https://technifree.com/assets/fiches/LibreGED.html" target="_blank">technifree</a></span>
             </div>
@@ -96,7 +96,16 @@
             <br>
             <p>
             <h3>Suivi des versions </h3>
-             <br>
+            <br>
+             - <b>18/05/2026</b> Version 2.9.1<br>
+            <ul>
+                <li>Correction du crash sous Windows sur les fichiers HTML, DOCX, ODT, SVG, MHTML, EML et Markdown — une seule instance WebEngine réutilisée au lieu d'en créer une nouvelle à chaque fichier</li>
+                <li>Correction de l'écran blanc lors du second affichage d'un fichier HTML (appel répété sur le même fichier)</li>
+                <li>Suppression des surlignages Ctrl+F lors du changement de fichier</li>
+                <li>Fermeture automatique de la barre de recherche Ctrl+F lors du changement de fichier</li>
+                <li>Correction du blocage multi-instances sous Windows après un crash (remplacement du verrou fichier par un Named Mutex Windows)</li>
+            </ul>
+            <br>
              - <b>15/05/2026</b> Version 2.9.0<br>
             <ul>
                 <li>Gestionnaire de tags alphabétique : navigation A–Z, cycles clavier, chips colorées, renommage et suppression globale sur tous les documents</li>
