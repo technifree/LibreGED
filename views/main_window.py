@@ -1691,7 +1691,7 @@ class MainWindow(QMainWindow):
         self.update_file_info_label_state(False)
 
         if self.html_preview:
-            self.html_preview.hide()
+            self.html_preview.stop()  # NE PAS cacher — setCurrentWidget() gère la visibilité
 
         display_text = item.text()
         
