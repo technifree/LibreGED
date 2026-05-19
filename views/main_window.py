@@ -1,4 +1,4 @@
-# LibreGED v2.9.1 - 18/05/2026
+# LibreGED v2.9.2 - 19/05/2026
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QPushButton, QLabel, QLineEdit, QTextEdit,
@@ -1518,7 +1518,7 @@ class MainWindow(QMainWindow):
         self.setWindowIcon(flag_icon)
 
         # 2) on assemble le texte
-        title = "LibreGED v.2.9.1"
+        title = "LibreGED v.2.9.2"
         if filename:
             title += f" – {filename}"
         self.setWindowTitle(title)
@@ -1683,9 +1683,14 @@ class MainWindow(QMainWindow):
 
         if self.html_preview:
             try:
-                self.html_preview.page().findText("")  # efface les surlignages Ctrl+F
+                self.html_preview.page().findText("")
+                self.html_preview.stop()
             except Exception:
                 pass
+        # Basculer le stack sur text_preview (VISIBLE) pour masquer html_preview
+        if hasattr(self, 'preview_stack') and hasattr(self, 'text_preview'):
+            self.text_preview.setVisible(True)
+            self.preview_stack.setCurrentWidget(self.text_preview)
 
         # Fermer la barre Ctrl+F si ouverte
         if hasattr(self, 'search_bar_widget') and self.search_bar_widget.isVisible():
@@ -1913,6 +1918,8 @@ class MainWindow(QMainWindow):
             accent = QColor("#FFD600")   # jaune vif
             accent.setAlpha(160)
 
+            if not self.pdf_doc:
+                return
             page = self.pdf_doc.load_page(self.current_pdf_page)
             rects = page.search_for(term)
             if not rects:
@@ -2487,23 +2494,30 @@ class MainWindow(QMainWindow):
         self.original_pixmap = None
         self.current_zoom = 1.0
 
-        # Vider les prévisualisations de texte et les masquer
+        # Vider les prévisualisations de texte et d'image
         if self.text_preview:
             self.text_preview.clear()
-            self.text_preview.setVisible(False)
+            # NE PAS appeler setVisible(False) ici — on va en faire le widget courant
+            # du stack juste après pour masquer les autres widgets
 
         # Vider la prévisualisation d'image et la masquer
         if self.image_preview_label:
             self.image_preview_label.clear()
             self.image_scroll.setVisible(False)
 
-        # Nettoyer le QWebEngineView : effacer highlights et stopper le chargement
+        # Nettoyer le QWebEngineView : effacer highlights et stopper
         if hasattr(self, 'html_preview') and self.html_preview is not None:
             try:
-                self.html_preview.page().findText("")  # efface les surlignages Ctrl+F
+                self.html_preview.page().findText("")
                 self.html_preview.stop()
             except RuntimeError as e:
                 print(f"[AVERTISSEMENT] html_preview inaccessible : {e}")
+
+        # Basculer le stack sur text_preview (vide et VISIBLE) pour masquer
+        # visuellement html_preview sans appeler .hide() dessus
+        if hasattr(self, 'preview_stack') and hasattr(self, 'text_preview'):
+            self.text_preview.setVisible(True)   # doit être visible pour être affiché par le stack
+            self.preview_stack.setCurrentWidget(self.text_preview)
 
         # Fermer la barre Ctrl+F si ouverte
         if hasattr(self, 'search_bar_widget') and self.search_bar_widget.isVisible():
@@ -2523,7 +2537,7 @@ class MainWindow(QMainWindow):
         self.top_page_selector.setVisible(False)
         self.top_selector_widget.setVisible(False)
 
-        # Réinitialiser le bouton de métadonnées
+        # Désactiver le bouton métadonnées simplement
         self.toggle_metadata_button.setEnabled(False)
 
         # Réinitialiser le widget XLSX
@@ -3463,11 +3477,15 @@ class MainWindow(QMainWindow):
 
 
     def render_current_pdf_page(self, dpi=150, adapt_to_width=False):
-        if not self.pdf_doc or self.pdf_doc.page_count == 0:
+        # Guard: pdf_doc peut être mis à None par clear_preview pendant le rendu
+        pdf_doc = self.pdf_doc
+        if not pdf_doc or pdf_doc.page_count == 0:
             self.show_text_preview(self.t("pdf_empty_or_invalid"))
             return
 
         try:
+            if not self.pdf_doc:   # re-vérifier (peut être mis à None entre-temps)
+                return
             page = self.pdf_doc.load_page(self.current_pdf_page)
             pix = page.get_pixmap(dpi=dpi)
             mode = QImage.Format_RGB888 if pix.alpha == 0 else QImage.Format_RGBA8888
@@ -3489,7 +3507,7 @@ class MainWindow(QMainWindow):
 
             self.apply_zoom()
 
-            self.text_preview.hide()
+            self.text_preview.setVisible(True)  # doit rester visible pour le stack
             self.image_scroll.show()
             self.zoom_controls_widget.show()
 
@@ -3792,6 +3810,21 @@ class MainWindow(QMainWindow):
             self.reindex_files()
 
     def reindex_files(self):
+        # ── Fermer le panneau métadonnées AVANT de lancer le thread ──────────
+        # Si l'animation est en cours quand on_reindex_done modifie les widgets,
+        # Qt crash. On ferme tout proprement ici, en synchrone, avant tout.
+        if hasattr(self, 'metadata_animation'):
+            self.metadata_animation.stop()
+        if hasattr(self, 'toggle_metadata_button'):
+            self.toggle_metadata_button.blockSignals(True)
+            self.toggle_metadata_button.setChecked(False)
+            self.toggle_metadata_button.setEnabled(False)
+            self.toggle_metadata_button.blockSignals(False)
+        if hasattr(self, 'metadata_form'):
+            self.metadata_form.setMaximumHeight(0)
+            self.metadata_form.hide()
+        # ─────────────────────────────────────────────────────────────────────
+
         class ReindexWorker(QObject):
             progress = Signal(int, int)
             finished = Signal(int)
@@ -3988,6 +4021,45 @@ class MainWindow(QMainWindow):
     def on_reindex_done(self, count):
         print(f"[INFO] Réindexation : {count} fichier(s) détecté(s)")
 
+        # Mémoriser le contexte AVANT de reconstruire l'arbre.
+        # Sinon, après load_documents(), currentItem() peut pointer vers un dossier
+        # reconstruit et le bloc de rechargement peut l'envoyer dans load_preview_from_path(),
+        # ce qui transforme joyeusement un dossier en "fichier non supporté". L'humanité
+        # avait besoin de cette nuance.
+        previous_rel_path = None
+        previous_item_type = None
+        previous_folder_path = None
+
+        try:
+            current_item_before = self.tree.currentItem()
+            if current_item_before:
+                previous_rel_path = current_item_before.data(0, Qt.ItemDataRole.UserRole)
+                previous_item_type = current_item_before.data(0, Qt.ItemDataRole.UserRole + 1)
+        except Exception as e:
+            print(f"[WARN] Contexte sélection avant réindexation indisponible : {e}")
+
+        try:
+            if (
+                hasattr(self, "preview_stack")
+                and hasattr(self, "folder_browser")
+                and self.preview_stack.currentWidget() is self.folder_browser
+                and getattr(self.folder_browser, "_current_path", None)
+            ):
+                previous_folder_path = Path(self.folder_browser._current_path)
+        except Exception as e:
+            print(f"[WARN] Contexte dossier avant réindexation indisponible : {e}")
+
+        # Stopper l'animation de métadonnées EN PREMIER (avant tout changement d'état)
+        if hasattr(self, 'metadata_animation'):
+            self.metadata_animation.stop()
+        if hasattr(self, 'toggle_metadata_button'):
+            self.toggle_metadata_button.blockSignals(True)
+            self.toggle_metadata_button.setChecked(False)
+            self.toggle_metadata_button.blockSignals(False)
+        if hasattr(self, 'metadata_form'):
+            self.metadata_form.setMaximumHeight(0)
+            self.metadata_form.hide()
+
         # Important : déconnecte les signaux ici aussi
         try: self.worker.progress.disconnect()
         except: pass
@@ -4007,28 +4079,70 @@ class MainWindow(QMainWindow):
 
         self.hide_progress_bar_fade()
         self.reindex_button.setEnabled(True)
+
+        # Un import / une création de dossier doit prendre la priorité sur l'ancien contexte.
+        folder_to_select = getattr(self, "folder_to_select_after_reindex", None)
+        if folder_to_select:
+            previous_rel_path = folder_to_select
+            previous_item_type = "folder"
+            previous_folder_path = config.FILES_DIR / folder_to_select
+            try:
+                del self.folder_to_select_after_reindex
+            except Exception:
+                pass
+
+        # Reconstruire l'arborescence, puis repartir d'une preview propre.
         self.load_documents()
         self.clear_preview()
-
-        # Sélectionner le dossier créé s'il a été stocké
-        if hasattr(self, "folder_to_select_after_reindex"):
-            self.select_and_expand_item(self.folder_to_select_after_reindex)
-            del self.folder_to_select_after_reindex
-
         self.update_file_count()
 
-        # Rafraîchir le folder_browser s'il affiche un dossier
-        if hasattr(self, 'folder_browser') and self.folder_browser._current_path:
-            fp = self.folder_browser._current_path
-            if fp.exists():
-                self.folder_browser.load_folder(fp, push_history=False)
+        def _restore_after_reindex():
+            try:
+                # 1) Cas prioritaire : on était dans le navigateur de dossier.
+                if previous_folder_path and previous_folder_path.exists() and previous_folder_path.is_dir():
+                    try:
+                        rel = str(previous_folder_path.relative_to(config.FILES_DIR))
+                    except ValueError:
+                        rel = None
 
-        # Rafraîchir la prévisualisation si un fichier est toujours sélectionné
-        current_item = self.tree.currentItem()
-        if current_item:
-            rel_path = current_item.data(0, Qt.ItemDataRole.UserRole)
-            if rel_path:
-                self.load_preview_from_path(rel_path)
+                    if rel and rel != ".":
+                        self._select_tree_folder_by_rel_path(rel)
+
+                    self._show_folder_browser(previous_folder_path)
+                    return
+
+                # 2) Cas arbre gauche : vérifier le type réel sur disque plutôt que
+                # faire confiance à un item Qt fraîchement reconstruit. Oui, c'est mieux.
+                if previous_rel_path:
+                    abs_path = config.FILES_DIR / previous_rel_path
+
+                    if abs_path.exists() and abs_path.is_dir():
+                        self._select_tree_folder_by_rel_path(str(previous_rel_path))
+                        self._show_folder_browser(abs_path)
+                        return
+
+                    if abs_path.exists() and abs_path.is_file():
+                        self._select_tree_item_by_rel_path(str(previous_rel_path))
+                        self._exit_folder_browser()
+                        self.load_preview_from_path(str(previous_rel_path))
+                        self.load_metadata(str(previous_rel_path))
+                        if hasattr(self, "toggle_metadata_button"):
+                            self.toggle_metadata_button.show()
+                            self.toggle_metadata_button.setEnabled(True)
+                        self._schedule_search_highlight()
+                        return
+
+                # 3) Rien à restaurer : état neutre, mais pas de fausse prévisualisation.
+                self.previewed_file_path = None
+                if hasattr(self, "update_file_info_label_state"):
+                    self.update_file_info_label_state(False)
+
+            except Exception as e:
+                print(f"[WARN] restore after reindex: {e}")
+
+        # Laisser Qt finir de respirer après clear_preview/load_documents.
+        # Sinon il refait du Qt, donc il mord.
+        QTimer.singleShot(0, _restore_after_reindex)
 
         msg_text = self.t("reindex_done_message").format(count=count)
         self.statusBar().showMessage(f"✅  {msg_text}", 5000)
@@ -4121,6 +4235,7 @@ class MainWindow(QMainWindow):
         Appelé quand l'utilisateur clique sur un fichier dans le navigateur.
         Bascule vers la prévisualisation du fichier.
         """
+        self._reset_metadata_panel()   # stoppe animation + ferme panneau
         self._exit_folder_browser()
         self.load_preview_from_path(rel_path)
         self.load_metadata(rel_path)
@@ -4999,18 +5114,42 @@ class MainWindow(QMainWindow):
         # désactive le bouton 'Réinitialiser' jusqu'à la prochaine recherche
         self.reset_button.setEnabled(False)
 
+    def _reset_metadata_panel(self):
+        """
+        Remet le panneau métadonnées à l'état initial de façon sûre.
+        Stoppe l'animation en cours et bloque les signaux pour éviter
+        tout conflit entre l'animation et les manipulations directes.
+        """
+        # 1. Stopper l'animation si elle tourne (sinon elle continue après hide())
+        if hasattr(self, 'metadata_animation'):
+            self.metadata_animation.stop()
+
+        # 2. Bloquer le signal clicked pour que setChecked(False) ne déclenche
+        #    pas toggle_metadata_visibility (qui relancerait une animation)
+        self.toggle_metadata_button.blockSignals(True)
+        self.toggle_metadata_button.setChecked(False)
+        self.toggle_metadata_button.setEnabled(False)
+        self.toggle_metadata_button.blockSignals(False)
+
+        # 3. Remettre le panneau à hauteur nulle et le cacher directement
+        if hasattr(self, 'metadata_form'):
+            self.metadata_form.setMaximumHeight(0)
+            self.metadata_form.hide()
+
+        self.set_metadata_fields_enabled(False)
+
     def refresh_ui(self):
         """
         Vide la prévisualisation et remet
-        l'arborescence + l'UI au Â« state Â» de démarrage.
+        l'arborescence + l'UI au « state » de démarrage.
         """
         # 1) Vider la preview
         self.clear_preview()
-        
+
         # 2) Recharger l'arborescence complète
         self.tree.clear()
         self.load_documents()
-        
+
         # 3) Cacher/vider tous les éléments de recherche
         self.search_input.clear()
         self.search_count_label.clear()
@@ -5020,12 +5159,18 @@ class MainWindow(QMainWindow):
         self.progress_label.clear()
         self.progress_label.hide()
         self.stop_search_button.setVisible(False)
-        
-        # 4) Remettre l'état des métadonnées à Â« vide Â»
-        self.set_metadata_fields_enabled(False)
+
+        # 4) Remettre l'état des métadonnées à « vide »
+        if hasattr(self, 'metadata_animation'):
+            self.metadata_animation.stop()
+        self.toggle_metadata_button.blockSignals(True)
         self.toggle_metadata_button.setChecked(False)
+        self.toggle_metadata_button.setEnabled(False)
+        self.toggle_metadata_button.blockSignals(False)
+        self.metadata_form.setMaximumHeight(0)
         self.metadata_form.hide()
-        
+        self.set_metadata_fields_enabled(False)
+
         # 5) Réinitialiser les var. internes si besoin
         self.pdf_doc = None
         self.original_pixmap = None
