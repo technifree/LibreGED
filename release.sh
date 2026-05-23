@@ -35,17 +35,24 @@ echo ""
 
 # ── Étape 1 : Mise à jour du README ───────────────────────────────────────────
 echo "[1/7] Mise à jour du README..."
-TODAY=$(date +'%d %B %Y' | LC_ALL=fr_FR.UTF-8 date -f - +'%d %B %Y' 2>/dev/null || date +'%d/%m/%Y')
 VERSION_NUM="${VERSION#v}"   # retire le "v" → 2.8.2
 
-# Remplacer le badge de version (tous les formats possibles)
+# Date en anglais (ex: 19 May 2026)
+DATE_EN=$(LC_ALL=en_US.UTF-8 date +'%-d %B %Y' 2>/dev/null || date +'%d/%m/%Y')
+# Date en français (ex: 19 mai 2026)
+DATE_FR=$(LC_ALL=fr_FR.UTF-8 date +'%-d %B %Y' 2>/dev/null || date +'%d/%m/%Y')
+
+# Remplacer tous les badges de version (anglais + français)
 sed -i "s/version-[0-9]\+\.[0-9]\+\.[0-9]\+/version-${VERSION_NUM}/g" README.md
 
-# Remplacer la date (format "DD mois YYYY" ou "DD/MM/YYYY")
-sed -i "s/Mise à jour :.*$/Mise à jour : $(date +'%d %B %Y')/" README.md
+# Mettre à jour la date anglaise : *Last updated: DD Month YYYY*
+sed -i "s|\*Last updated:.*\*|\*Last updated: ${DATE_EN}\*|g" README.md
+
+# Mettre à jour la date française : *Mise à jour : DD mois YYYY*
+sed -i "s|\*Mise à jour :.*\*|\*Mise à jour : ${DATE_FR}\*|g" README.md
 
 git add README.md
-echo "      OK — README mis à jour (v${VERSION_NUM}, $(date +'%d %B %Y'))"
+echo "      OK — README mis à jour (v${VERSION_NUM}, EN: ${DATE_EN} / FR: ${DATE_FR})"
 
 # ── Étape 2 : Commit + push EN PREMIER ────────────────────────────────────────
 echo "[2/7] Commit et push du code source..."

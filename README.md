@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-2.9.2-blue"/>
+  <img src="https://img.shields.io/badge/version-2.9.3-blue"/>
   <img src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS-lightgrey"/>
   <img src="https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white"/>
   <img src="https://img.shields.io/badge/PySide6-6.9-green"/>
@@ -22,7 +22,7 @@
 </p>
 
 <p align="center">
-  *Last updated: 19 May 2026*
+  *Last updated: 23 May 2026*
 </p>
 
 <p align="center">
@@ -113,7 +113,7 @@ MIT — [technifree.com](https://technifree.com)
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-2.9.2-blue"/>
+  <img src="https://img.shields.io/badge/version-2.9.3-blue"/>
   <img src="https://img.shields.io/badge/plateforme-Linux%20%7C%20Windows%20%7C%20macOS-lightgrey"/>
   <img src="https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white"/>
   <img src="https://img.shields.io/badge/PySide6-6.9-green"/>
@@ -122,7 +122,7 @@ MIT — [technifree.com](https://technifree.com)
 </p>
 
 <p align="center">
-  *Mise à jour : 19 mai 2026*
+  *Mise à jour : 23 mai 2026*
 </p>
 
 <p align="center">

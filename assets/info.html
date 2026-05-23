@@ -28,14 +28,14 @@
             <div style="text-align: center">
                 <!-- <img src="../assets/proxy-image.png" alt="Technifree" class="img-fluid logo" style="width: 20%;">-->
                 <h1><b>LibreGED</b></h1>
-                <p>Version 2.9.2</p>
+                <p>Version 2.9.3</p>
             </div>
         </div>
         <div class="content">
             <div style="text-align: center">
                 <h3>Gestionnaire de fichier simple pour GED personnelle</h3>
                     <br>
-                version du: <b>19/05/2026</b><br>
+                version du: <b>23/05/2026</b><br>
                     <br>
                 <span>site web de l'application : <a href="https://technifree.com/assets/fiches/LibreGED.html" target="_blank">technifree</a></span>
             </div>
@@ -96,6 +96,18 @@
             <br>
             <p>
             <h3>Suivi des versions </h3>
+            <br>
+            - <b>23/05/2026</b> Version 2.9.3<br>
+            <ul>
+                <li>Correction des crashs au démarrage sur certaines configurations Windows (GPU hybride, pilotes virtuels) : QtWebEngine n'est plus initialisé au lancement mais uniquement à la première ouverture d'un document HTML, DOCX ou ODT</li>
+                <li>Correction des processus zombies impossibles à terminer après un crash QtWebEngine</li>
+                <li>Impression partielle ou totale : nouveau dialogue de sélection de pages (toutes les pages, page actuelle, plage personnalisée ex : 1-3, 5, 8-10) pour les PDF, disponible depuis la prévisualisation et depuis le navigateur de dossiers</li>
+                <li>Correction de plusieurs doublons internes (clear_preview, eventFilter, zoom_label, search_count_label, preview_frame) pouvant générer des comportements erratiques</li>
+                <li>Correction du rendu PDF et images : ajout de .copy() sur les buffers QImage pour éviter les crashs silencieux liés à des références mémoire invalides</li>
+                <li>Fermeture propre du document PDF lors du changement de fichier</li>
+                <li>La barre de progression s'affiche désormais correctement pendant la réindexation manuelle</li>
+                <li>La fenêtre À propos bascule sur un affichage texte si QtWebEngine est indisponible sur la machine</li>
+            </ul>
             <br>
               - <b>19/05/2026</b> Version 2.9.2<br>
             <ul>

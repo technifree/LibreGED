@@ -223,7 +223,18 @@
     "btn_cancel": "Annuler",
     "btn_ok": "OK",
     "import_action_question": "Choisissez une action :",
-    "import_move": "Déplacer"
+    "import_move": "Déplacer",
+    "print_dialog_title": "Imprimer",
+    "print_range_group": "Étendue d'impression",
+    "print_all_pages": "Toutes les pages",
+    "print_current_page": "Page actuelle",
+    "print_page_range": "Plage de pages :",
+    "print_range_placeholder": "ex : 1-3, 5, 8-10",
+    "print_page_count": "Document : {n} page(s)",
+    "print_range_error": "Plage invalide. Format attendu : 1-3, 5, 8-10\nPages disponibles : 1 à {total}",
+    "print_button": "Imprimer",
+    "print_success": "Impression envoyée ({n} page(s)).",
+    "print_error_init": "Impossible d'initialiser l'imprimante."
   },
   "en": {
     "about_title": "About LibreGED",
@@ -449,7 +460,18 @@
     "btn_cancel": "Cancel",
     "btn_ok": "OK",
     "import_action_question": "Choose an action:",
-    "import_move": "Move"
+    "import_move": "Move",
+    "print_dialog_title": "Print",
+    "print_range_group": "Print range",
+    "print_all_pages": "All pages",
+    "print_current_page": "Current page",
+    "print_page_range": "Page range:",
+    "print_range_placeholder": "e.g. 1-3, 5, 8-10",
+    "print_page_count": "Document: {n} page(s)",
+    "print_range_error": "Invalid range. Expected format: 1-3, 5, 8-10\nAvailable pages: 1 to {total}",
+    "print_button": "Print",
+    "print_success": "Print job sent ({n} page(s)).",
+    "print_error_init": "Unable to initialize the printer."
   },
   "de": {
     "about_title": "Über LibreGED",
@@ -675,7 +697,18 @@
     "btn_cancel": "Abbrechen",
     "btn_ok": "OK",
     "import_action_question": "Aktion wählen:",
-    "import_move": "Verschieben"
+    "import_move": "Verschieben",
+    "print_dialog_title": "Drucken",
+    "print_range_group": "Druckbereich",
+    "print_all_pages": "Alle Seiten",
+    "print_current_page": "Aktuelle Seite",
+    "print_page_range": "Seitenbereich:",
+    "print_range_placeholder": "z. B. 1-3, 5, 8-10",
+    "print_page_count": "Dokument: {n} Seite(n)",
+    "print_range_error": "Ungültiger Bereich. Erwartetes Format: 1-3, 5, 8-10\nVerfügbare Seiten: 1 bis {total}",
+    "print_button": "Drucken",
+    "print_success": "Druckauftrag gesendet ({n} Seite(n)).",
+    "print_error_init": "Drucker konnte nicht initialisiert werden."
   },
   "it": {
     "about_title": "Informazioni su LibreGED",
@@ -901,7 +934,18 @@
     "btn_cancel": "Annulla",
     "btn_ok": "OK",
     "import_action_question": "Scegli un'azione:",
-    "import_move": "Sposta"
+    "import_move": "Sposta",
+    "print_dialog_title": "Stampa",
+    "print_range_group": "Intervallo di stampa",
+    "print_all_pages": "Tutte le pagine",
+    "print_current_page": "Pagina corrente",
+    "print_page_range": "Intervallo di pagine:",
+    "print_range_placeholder": "es. 1-3, 5, 8-10",
+    "print_page_count": "Documento: {n} pagina/e",
+    "print_range_error": "Intervallo non valido. Formato atteso: 1-3, 5, 8-10\nPagine disponibili: 1-{total}",
+    "print_button": "Stampa",
+    "print_success": "Stampa inviata ({n} pagina/e).",
+    "print_error_init": "Impossibile inizializzare la stampante."
   },
   "es": {
     "about_title": "Acerca de LibreGED",
@@ -1127,7 +1171,18 @@
     "btn_cancel": "Cancelar",
     "btn_ok": "OK",
     "import_action_question": "Elige una acción:",
-    "import_move": "Mover"
+    "import_move": "Mover",
+    "print_dialog_title": "Imprimir",
+    "print_range_group": "Intervalo de impresión",
+    "print_all_pages": "Todas las páginas",
+    "print_current_page": "Página actual",
+    "print_page_range": "Intervalo de páginas:",
+    "print_range_placeholder": "ej. 1-3, 5, 8-10",
+    "print_page_count": "Documento: {n} página(s)",
+    "print_range_error": "Intervalo no válido. Formato esperado: 1-3, 5, 8-10\nPáginas disponibles: 1-{total}",
+    "print_button": "Imprimir",
+    "print_success": "Impresión enviada ({n} página(s)).",
+    "print_error_init": "No se puede inicializar la impresora."
   },
   "nl": {
     "about_title": "Over LibreGED",
@@ -1353,7 +1408,18 @@
     "btn_cancel": "Annuleren",
     "btn_ok": "OK",
     "import_action_question": "Kies een actie:",
-    "import_move": "Verplaatsen"
+    "import_move": "Verplaatsen",
+    "print_dialog_title": "Afdrukken",
+    "print_range_group": "Afdrukbereik",
+    "print_all_pages": "Alle pagina's",
+    "print_current_page": "Huidige pagina",
+    "print_page_range": "Paginabereik:",
+    "print_range_placeholder": "bijv. 1-3, 5, 8-10",
+    "print_page_count": "Document: {n} pagina('s)",
+    "print_range_error": "Ongeldig bereik. Verwacht formaat: 1-3, 5, 8-10\nBeschikbare pagina's: 1-{total}",
+    "print_button": "Afdrukken",
+    "print_success": "Afdruktaak verzonden ({n} pagina('s)).",
+    "print_error_init": "Kan de printer niet initialiseren."
   },
   "pt": {
     "about_title": "Sobre o LibreGED",
@@ -1579,7 +1645,18 @@
     "btn_cancel": "Cancelar",
     "btn_ok": "OK",
     "import_action_question": "Escolha uma ação:",
-    "import_move": "Mover"
+    "import_move": "Mover",
+    "print_dialog_title": "Imprimir",
+    "print_range_group": "Intervalo de impressão",
+    "print_all_pages": "Todas as páginas",
+    "print_current_page": "Página atual",
+    "print_page_range": "Intervalo de páginas:",
+    "print_range_placeholder": "ex. 1-3, 5, 8-10",
+    "print_page_count": "Documento: {n} página(s)",
+    "print_range_error": "Intervalo inválido. Formato esperado: 1-3, 5, 8-10\nPáginas disponíveis: 1-{total}",
+    "print_button": "Imprimir",
+    "print_success": "Impressão enviada ({n} página(s)).",
+    "print_error_init": "Não foi possível inicializar a impressora."
   },
   "pl": {
     "about_title": "O LibreGED",
@@ -1805,7 +1882,18 @@
     "btn_cancel": "Anuluj",
     "btn_ok": "OK",
     "import_action_question": "Wybierz akcję:",
-    "import_move": "Przenieś"
+    "import_move": "Przenieś",
+    "print_dialog_title": "Drukuj",
+    "print_range_group": "Zakres drukowania",
+    "print_all_pages": "Wszystkie strony",
+    "print_current_page": "Bieżąca strona",
+    "print_page_range": "Zakres stron:",
+    "print_range_placeholder": "np. 1-3, 5, 8-10",
+    "print_page_count": "Dokument: {n} strona(y)",
+    "print_range_error": "Nieprawidłowy zakres. Oczekiwany format: 1-3, 5, 8-10\nDostępne strony: 1-{total}",
+    "print_button": "Drukuj",
+    "print_success": "Zadanie drukowania wysłane ({n} strona(y)).",
+    "print_error_init": "Nie można zainicjować drukarki."
   },
   "sw": {
     "about_title": "Om LibreGED",
@@ -2031,7 +2119,18 @@
     "btn_cancel": "Avbryt",
     "btn_ok": "OK",
     "import_action_question": "Välj en åtgärd:",
-    "import_move": "Flytta"
+    "import_move": "Flytta",
+    "print_dialog_title": "Skriv ut",
+    "print_range_group": "Utskriftsintervall",
+    "print_all_pages": "Alla sidor",
+    "print_current_page": "Aktuell sida",
+    "print_page_range": "Sidintervall:",
+    "print_range_placeholder": "t.ex. 1-3, 5, 8-10",
+    "print_page_count": "Dokument: {n} sida/sidor",
+    "print_range_error": "Ogiltigt intervall. Förväntat format: 1-3, 5, 8-10\nTillgängliga sidor: 1-{total}",
+    "print_button": "Skriv ut",
+    "print_success": "Utskriftsjobb skickat ({n} sida/sidor).",
+    "print_error_init": "Det gick inte att initiera skrivaren."
   },
   "dk": {
     "about_title": "Om LibreGED",
@@ -2257,7 +2356,18 @@
     "btn_cancel": "Annuller",
     "btn_ok": "OK",
     "import_action_question": "Vælg en handling:",
-    "import_move": "Flyt"
+    "import_move": "Flyt",
+    "print_dialog_title": "Udskriv",
+    "print_range_group": "Udskriftsinterval",
+    "print_all_pages": "Alle sider",
+    "print_current_page": "Aktuel side",
+    "print_page_range": "Sideinterval:",
+    "print_range_placeholder": "f.eks. 1-3, 5, 8-10",
+    "print_page_count": "Dokument: {n} side(r)",
+    "print_range_error": "Ugyldigt interval. Forventet format: 1-3, 5, 8-10\nTilgængelige sider: 1-{total}",
+    "print_button": "Udskriv",
+    "print_success": "Udskriftsjob sendt ({n} side(r)).",
+    "print_error_init": "Kan ikke initialisere printeren."
   },
   "fi": {
     "about_title": "Tietoja LibreGEDistä",
@@ -2483,7 +2593,18 @@
     "btn_cancel": "Peruuta",
     "btn_ok": "OK",
     "import_action_question": "Valitse toiminto:",
-    "import_move": "Siirrä"
+    "import_move": "Siirrä",
+    "print_dialog_title": "Tulosta",
+    "print_range_group": "Tulostusalue",
+    "print_all_pages": "Kaikki sivut",
+    "print_current_page": "Nykyinen sivu",
+    "print_page_range": "Sivualue:",
+    "print_range_placeholder": "esim. 1-3, 5, 8-10",
+    "print_page_count": "Asiakirja: {n} sivu(a)",
+    "print_range_error": "Virheellinen alue. Odotettu muoto: 1-3, 5, 8-10\nSaatavilla olevat sivut: 1-{total}",
+    "print_button": "Tulosta",
+    "print_success": "Tulostustyö lähetetty ({n} sivu(a)).",
+    "print_error_init": "Tulostinta ei voida alustaa."
   },
   "gr": {
     "about_title": "Σχετικά με το LibreGED",
@@ -2709,7 +2830,18 @@
     "btn_cancel": "Ακύρωση",
     "btn_ok": "OK",
     "import_action_question": "Επιλέξτε ενέργεια:",
-    "import_move": "Μετακίνηση"
+    "import_move": "Μετακίνηση",
+    "print_dialog_title": "Εκτύπωση",
+    "print_range_group": "Εύρος εκτύπωσης",
+    "print_all_pages": "Όλες οι σελίδες",
+    "print_current_page": "Τρέχουσα σελίδα",
+    "print_page_range": "Εύρος σελίδων:",
+    "print_range_placeholder": "π.χ. 1-3, 5, 8-10",
+    "print_page_count": "Έγγραφο: {n} σελίδα/ες",
+    "print_range_error": "Μη έγκυρο εύρος. Αναμενόμενη μορφή: 1-3, 5, 8-10\nΔιαθέσιμες σελίδες: 1-{total}",
+    "print_button": "Εκτύπωση",
+    "print_success": "Εργασία εκτύπωσης στάλθηκε ({n} σελίδα/ες).",
+    "print_error_init": "Αδυναμία αρχικοποίησης εκτυπωτή."
   },
   "cz": {
     "about_title": "O aplikaci LibreGED",
@@ -2935,6 +3067,17 @@
     "btn_cancel": "Zrušit",
     "btn_ok": "OK",
     "import_action_question": "Vyberte akci:",
-    "import_move": "Přesunout"
+    "import_move": "Přesunout",
+    "print_dialog_title": "Tisk",
+    "print_range_group": "Rozsah tisku",
+    "print_all_pages": "Všechny stránky",
+    "print_current_page": "Aktuální stránka",
+    "print_page_range": "Rozsah stránek:",
+    "print_range_placeholder": "např. 1-3, 5, 8-10",
+    "print_page_count": "Dokument: {n} stránka/stránek",
+    "print_range_error": "Neplatný rozsah. Očekávaný formát: 1-3, 5, 8-10\nDostupné stránky: 1-{total}",
+    "print_button": "Tisknout",
+    "print_success": "Tisková úloha odeslána ({n} stránka/stránek).",
+    "print_error_init": "Nelze inicializovat tiskárnu."
   }
 }

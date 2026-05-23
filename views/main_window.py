@@ -1,8 +1,9 @@
-# LibreGED v2.9.2 - 19/05/2026
+# LibreGED v2.9.3 - 23/05/2026
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QPushButton, QLabel, QLineEdit, QTextEdit,
     QVBoxLayout, QHBoxLayout, QGridLayout, QFormLayout, QSplitter, QSplitterHandle, QScrollArea,
+    QFrame,
     QListWidget, QListWidgetItem, QTreeWidget, QTreeWidgetItem, QTreeWidgetItemIterator,
     QMessageBox, QMenu, QToolTip, QSizePolicy, QSpacerItem, QStackedLayout,
     QGraphicsOpacityEffect, QApplication, QStyleFactory, QDialog, QStackedWidget,
@@ -22,7 +23,9 @@ from PySide6.QtGui import (
     QKeySequence, QTextCursor, QTextCharFormat, QShortcut
 )
 
-from PySide6.QtWebEngineWidgets import QWebEngineView
+# QWebEngineView est importé conditionnellement plus bas (try/except)
+# afin que l'application reste fonctionnelle même si les DLLs QtWebEngine
+# sont absentes ou défaillantes sur la machine cible.
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 import matplotlib.pyplot as plt
 
@@ -751,6 +754,131 @@ class ThemePickerDialog(QDialog):
         self.accept()
 
 
+# ─── Dialogue de sélection de la plage d'impression ──────────────────────────
+
+class PrintRangeDialog(QDialog):
+    """
+    Permet de choisir les pages à imprimer :
+      • Toutes les pages
+      • Page actuelle (si multi-pages)
+      • Plage personnalisée  ex : 1-3, 5, 8-10
+    """
+
+    def __init__(self, page_count: int, current_page: int, translate_fn, parent=None):
+        super().__init__(parent)
+        self._page_count   = page_count
+        self._current_page = current_page   # 0-indexed
+        self._t            = translate_fn
+        self._build_ui()
+
+    def _build_ui(self):
+        self.setWindowTitle(self._t("print_dialog_title") or "Imprimer")
+        self.setMinimumWidth(360)
+        self.setModal(True)
+
+        root = QVBoxLayout(self)
+
+        # ── Groupe "Étendue" ──────────────────────────────────────────
+        from PySide6.QtWidgets import QGroupBox, QRadioButton
+        grp  = QGroupBox(self._t("print_range_group") or "Étendue d'impression")
+        vbox = QVBoxLayout(grp)
+
+        self.rb_all     = QRadioButton(self._t("print_all_pages") or "Toutes les pages")
+        self.rb_current = QRadioButton(
+            (self._t("print_current_page") or "Page actuelle")
+            + f"  (p. {self._current_page + 1})"
+        )
+        self.rb_range   = QRadioButton(self._t("print_page_range") or "Plage de pages :")
+
+        self.rb_all.setChecked(True)
+
+        self.range_edit = QLineEdit()
+        self.range_edit.setPlaceholderText(
+            self._t("print_range_placeholder") or "ex : 1-3, 5, 8-10"
+        )
+        self.range_edit.setEnabled(False)
+
+        self.rb_range.toggled.connect(self.range_edit.setEnabled)
+        self.rb_range.toggled.connect(
+            lambda on: self.range_edit.setFocus() if on else None
+        )
+
+        vbox.addWidget(self.rb_all)
+        if self._page_count > 1:
+            vbox.addWidget(self.rb_current)
+            vbox.addWidget(self.rb_range)
+            vbox.addWidget(self.range_edit)
+
+        lbl_count = QLabel(
+            (self._t("print_page_count") or "Document : {n} page(s)").format(
+                n=self._page_count)
+        )
+        lbl_count.setStyleSheet("color: gray; font-size: 11px;")
+        vbox.addWidget(lbl_count)
+        root.addWidget(grp)
+
+        # ── Boutons ───────────────────────────────────────────────────
+        from PySide6.QtWidgets import QDialogButtonBox
+        bbox = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        bbox.button(QDialogButtonBox.StandardButton.Ok).setText(
+            self._t("print_button") or "Imprimer"
+        )
+        bbox.button(QDialogButtonBox.StandardButton.Cancel).setText(
+            self._t("cancel") or "Annuler"
+        )
+        bbox.accepted.connect(self._validate)
+        bbox.rejected.connect(self.reject)
+        root.addWidget(bbox)
+
+    def _validate(self):
+        if self.rb_range.isChecked():
+            if self._parse_range(self.range_edit.text()) is None:
+                QMessageBox.warning(
+                    self,
+                    self._t("error_title") or "Erreur",
+                    (self._t("print_range_error") or
+                     "Plage invalide. Format attendu : 1-3, 5, 8-10\n"
+                     "Pages disponibles : 1 à {total}").format(total=self._page_count)
+                )
+                return
+        self.accept()
+
+    def _parse_range(self, text: str):
+        """Parse '1-3, 5, 8-10' → liste triée d'indices 0-based, ou None si invalide."""
+        pages = set()
+        try:
+            for part in text.replace(";", ",").split(","):
+                part = part.strip()
+                if not part:
+                    continue
+                if "-" in part:
+                    a, b = part.split("-", 1)
+                    a, b = int(a.strip()), int(b.strip())
+                    if a < 1 or b > self._page_count or a > b:
+                        return None
+                    pages.update(range(a - 1, b))
+                else:
+                    p = int(part)
+                    if p < 1 or p > self._page_count:
+                        return None
+                    pages.add(p - 1)
+        except ValueError:
+            return None
+        return sorted(pages) if pages else None
+
+    def get_pages(self) -> list:
+        """Retourne la liste (triée) des indices 0-based à imprimer."""
+        if not self._page_count:
+            return []
+        if self.rb_all.isChecked() or self._page_count == 1:
+            return list(range(self._page_count))
+        if self.rb_current.isChecked():
+            return [self._current_page]
+        return self._parse_range(self.range_edit.text()) or []
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -778,9 +906,6 @@ class MainWindow(QMainWindow):
 
         # --- Initialisation du compteur de résultats de recherche ---
         self.search_result_count = 0
-        self.search_count_label = QLabel("")
-        self.search_count_label.hide()
-        self.statusBar().addPermanentWidget(self.search_count_label)
 
         self.current_theme = config.load_user_theme()
         self.current_language = config.load_user_language()
@@ -1038,12 +1163,10 @@ class MainWindow(QMainWindow):
         self.image_scroll.viewport().setCursor(Qt.OpenHandCursor)
         self.image_scroll.viewport().installEventFilter(self)
 
-        # --- HTML (instance UNIQUE créée une seule fois) ---
-        if WEB_ENGINE_AVAILABLE and QWebEngineView:
-            self.html_preview = QWebEngineView()
-            self.preview_stack.addWidget(self.html_preview)
-        else:
-            self.html_preview = None
+        # --- HTML / WebEngine chargé à la demande (lazy) ---
+        # Ne PAS créer QWebEngineView ici : Chromium ne doit démarrer
+        # qu'au moment où un fichier HTML/DOCX/ODT est réellement affiché.
+        self.html_preview = None
 
         # --- XLS ---
         self.xlsx_tab_widget = QTabWidget()
@@ -1070,10 +1193,6 @@ class MainWindow(QMainWindow):
 
         # Sélection par défaut
         self.preview_stack.setCurrentWidget(self.text_preview)
-
-        # Ajout du preview_content_widget à l'interface
-        self.preview_layout.addWidget(self.preview_frame)
-
 
         # === Barre de recherche Ctrl+F ===
         self.search_bar_widget = QWidget()
@@ -1183,10 +1302,9 @@ class MainWindow(QMainWindow):
         # -- Zoom label --
         self.zoom_label = QLabel("Zoom : 100%")
         self.zoom_label.setAlignment(Qt.AlignCenter)
-        self.zoom_controls_layout.addWidget(self.zoom_label)  
-        
+
         self.zoom_controls_layout.addSpacing(20)
-        
+
         # Organisation dans le layout
         self.zoom_controls_layout.addWidget(self.prev_page_button)
         self.zoom_controls_layout.addStretch(1)
@@ -1445,7 +1563,7 @@ class MainWindow(QMainWindow):
 
     
     def _update_progress_value(self, val, total):
-        if not self._is_searching:
+        if not getattr(self, "_is_searching", False) and not getattr(self, "_is_reindexing", False):
             return
 
         try:
@@ -1518,7 +1636,7 @@ class MainWindow(QMainWindow):
         self.setWindowIcon(flag_icon)
 
         # 2) on assemble le texte
-        title = "LibreGED v.2.9.2"
+        title = "LibreGED v.2.9.3"
         if filename:
             title += f" – {filename}"
         self.setWindowTitle(title)
@@ -1670,162 +1788,6 @@ class MainWindow(QMainWindow):
         self.file_count_label.setText(self.t("file_count_label").format(count=count))
 
 
-    def clear_preview(self):
-        self.text_preview.hide()
-        self.image_scroll.hide()
-        self.zoom_controls_widget.hide()
-        self.prev_page_button.hide()
-        self.next_page_button.hide()
-        self.xlsx_tab_widget.setVisible(False)
-        self.top_page_selector.setVisible(False)  
-        self.previewed_file_path = None
-        self.update_file_info_label_state(False)
-
-        if self.html_preview:
-            try:
-                self.html_preview.page().findText("")
-                self.html_preview.stop()
-            except Exception:
-                pass
-        # Basculer le stack sur text_preview (VISIBLE) pour masquer html_preview
-        if hasattr(self, 'preview_stack') and hasattr(self, 'text_preview'):
-            self.text_preview.setVisible(True)
-            self.preview_stack.setCurrentWidget(self.text_preview)
-
-        # Fermer la barre Ctrl+F si ouverte
-        if hasattr(self, 'search_bar_widget') and self.search_bar_widget.isVisible():
-            self.search_bar_widget.setVisible(False)
-            if hasattr(self, 'find_input'):
-                self.find_input.clear()
-            if hasattr(self, 'find_count_label'):
-                self.find_count_label.setText("")
-            self._xlsx_find_cache = None
-            self._xlsx_find_index = -1
-
-        display_text = item.text()
-        
-        rel_path = item.data(0, Qt.ItemDataRole.UserRole)
-            
-        if not rel_path:
-            self.show_text_preview(self.t("error_missing_path"))
-            return
-
-        doc_path = config.FILES_DIR / rel_path  
-        
-        if not path_exists(doc_path):
-            self.show_text_preview(self.t("error_file_not_found"))
-            return
-        
-        ext = doc_path.suffix.lower().strip()
-
-        try:
-            if ext in [".html", ".htm"]:
-                if WEB_ENGINE_AVAILABLE and self.html_preview:
-                    try:
-                        self.html_preview.setVisible(True)
-                        self.html_preview.load(QUrl.fromLocalFile(str(doc_path)))
-                    except Exception as e:
-                        self.show_text_preview(self.t("error_loading_html").format(error=str(e)))
-                else:
-                    try:
-                        with open(win_path(doc_path), "r", encoding="utf-8", errors="ignore") as f:
-                            content = f.read()
-                        self.text_preview.setPlainText(content)
-                        self.text_preview.setVisible(True)
-                    except Exception as e:
-                        self.show_text_preview(self.t("error_reading_html").format(error=str(e)))
-
-            elif ext in [".txt", ".md", ".py"]:
-                with open(win_path(doc_path), "r", encoding="utf-8", errors="ignore") as f:
-                    content = f.read()
-                self.show_text_preview(content)
-
-            elif ext == ".pdf":
-                self.pdf_doc = fitz.open(win_path(doc_path))
-                self.current_pdf_page = 0
-                self.current_zoom = 1.0
-                self.render_current_pdf_page(adapt_to_width=True)
-
-                page_count = self.pdf_doc.page_count
-                print(f"[DEBUG] PDF détecté avec {page_count} pages")
-
-                if page_count > 1:
-                    self.top_page_selector.blockSignals(True)
-                    self.top_page_selector.clear()
-                    for i in range(page_count):
-                        icon = qta.icon("fa5.file-alt", color="#007BFF")  # ou "fa.file", "fa5s.file", etc.
-                        self.top_page_selector.addItem(icon, f"{self.t('page')} {i + 1}")
-                        #self.top_page_selector.addItem(f"Page {i + 1}")
-                    self.top_page_selector.setCurrentIndex(0)
-                    self.top_page_selector.setVisible(True)
-                    self.top_page_selector.setEnabled(True)
-                    self.top_page_selector.blockSignals(False)
-                    self.top_selector_widget.setVisible(True)  
-                else:
-                    self.top_page_selector.clear()
-                    self.top_page_selector.setVisible(False)
-                    self.top_page_selector.setEnabled(False)
-                    self.top_selector_widget.setVisible(False)  
-
-            elif ext in [".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tif", ".tiff"]:
-                try:
-                    image = Image.open(win_path(doc_path))
-                    try:
-                        for orientation in ExifTags.TAGS.keys():
-                            if ExifTags.TAGS[orientation] == 'Orientation':
-                                break
-                        exif = dict(image._getexif().items())
-                        orientation_value = exif.get(orientation, None)
-                        if orientation_value == 3:
-                            image = image.rotate(180, expand=True)
-                        elif orientation_value == 6:
-                            image = image.rotate(270, expand=True)
-                        elif orientation_value == 8:
-                            image = image.rotate(90, expand=True)
-                    except Exception as exif_err:
-                        print(f"[INFO] Aucune orientation EXIF ou erreur : {exif_err}")
-
-                    image = image.convert("RGBA")
-                    data = image.tobytes("raw", "RGBA")
-                    qim = QImage(data, image.width, image.height, image.width * 4, QImage.Format_RGBA8888)
-                    pixmap = QPixmap.fromImage(qim)
-
-                    if pixmap.isNull():
-                        self.show_text_preview(self.t("error_invalid_image"))
-                    else:
-                        self.pdf_doc = None
-                        self.current_zoom = 1.0
-                        self.show_image_preview(pixmap)
-
-                except Exception as e:
-                    QMessageBox.critical(self, self.t("error_loading_image"), str(e))
-
-            elif ext == ".epub":
-                self.show_epub_preview(doc_path)
-
-            elif ext == ".docx":
-                html = self.show_docx_preview(doc_path)
-                if html:
-                    self.show_html_preview(html)
-
-            elif ext == ".odt":
-                html = odf_utils.odt_to_html(win_path(doc_path))
-                self.show_html_preview(html)
-            
-            elif ext in [".xlsx", ".xlsm"]:
-                self.show_xlsx_preview(doc_path)
-
-            elif ext == ".pptx":
-                content = odf_utils.extract_text_from_pptx(doc_path)
-                self.show_text_preview(content if content else self.t("textfile_read_error").format(error=""))
-
-            else:
-                self.show_text_preview(self.t("error_unsupported"))
-
-        except Exception as e:
-            QMessageBox.critical(self, self.t("error_reading_file"), str(e))
-    
-    ###################################### VERSION 2.3 #################################
     def open_tree_context_menu(self, position):
         selected_item = self.tree.itemAt(position)
         if not selected_item:
@@ -2091,7 +2053,7 @@ class MainWindow(QMainWindow):
 
         # ── QWebEngineView (HTML, DOCX, ODT, EPUB, MHTML, EML, SVG…) ─────
         # On compare par type car html_preview peut avoir été recréé
-        if isinstance(current, QWebEngineView):
+        if QWebEngineView is not None and isinstance(current, QWebEngineView):
             from PySide6.QtWebEngineCore import QWebEnginePage
             flags = QWebEnginePage.FindFlag(0) if forward else QWebEnginePage.FindBackward
             current.page().findText(
@@ -2331,7 +2293,7 @@ class MainWindow(QMainWindow):
             html_content += "</body></html>"
 
             # === AFFICHAGE VIA QWebEngineView ===
-            if WEB_ENGINE_AVAILABLE:
+            if self._ensure_html_preview():
                 # Nettoyage de l'ancien fichier temporaire
                 if hasattr(self, "current_epub_tmpfile"):
                     try:
@@ -2339,20 +2301,18 @@ class MainWindow(QMainWindow):
                     except Exception as e:
                         print(f"[INFO] Impossible de supprimer l'ancien fichier temporaire : {e}")
 
-                # Ã‰criture dans un fichier temporaire
+                # Écriture dans un fichier temporaire
                 tmp = NamedTemporaryFile(delete=False, suffix=".html", mode="w", encoding="utf-8")
                 tmp.write(html_content)
                 tmp.close()
                 self.current_epub_tmpfile = tmp.name
 
-                # Création du nouveau QWebEngineView
-                if self.html_preview:
-                    import time
-                    url = QUrl(QUrl.fromLocalFile(tmp.name))
-                    url.setFragment(f"_r{int(time.time()*1000)}")
-                    self.html_preview.show()
-                    self.html_preview.load(url)
-                    self.preview_stack.setCurrentWidget(self.html_preview)
+                import time
+                url = QUrl(QUrl.fromLocalFile(tmp.name))
+                url.setFragment(f"_r{int(time.time()*1000)}")
+                self.html_preview.show()
+                self.html_preview.load(url)
+                self.preview_stack.setCurrentWidget(self.html_preview)
 
             else:
                 self.show_text_preview(self.t("error_epub_preview_unavailable"))
@@ -2490,7 +2450,15 @@ class MainWindow(QMainWindow):
 
 
     def clear_preview(self):
+        # Fermer proprement le document PDF avant de remettre la référence à None
+        old_pdf = getattr(self, "pdf_doc", None)
         self.pdf_doc = None
+        if old_pdf:
+            try:
+                old_pdf.close()
+            except Exception:
+                pass
+
         self.original_pixmap = None
         self.current_zoom = 1.0
 
@@ -3046,9 +3014,6 @@ class MainWindow(QMainWindow):
         self.backup_worker.finished.connect(self.backup_worker.deleteLater)
         self.thread.finished.connect(self.thread.deleteLater)
 
-        # Important : attendre la fin réelle du thread pour éviter les fuites
-        self.thread.finished.connect(lambda: self.thread.wait())
-
         # Démarrer
         self.thread.start()
 
@@ -3115,7 +3080,6 @@ class MainWindow(QMainWindow):
         self.restore_worker.finished.connect(self.restore_worker.deleteLater)
         self.thread.finished.connect(self.thread.deleteLater)
 
-        self.thread.finished.connect(lambda: self.thread.wait())
         self.thread.start()
 
     def on_restore_finished(self, message):
@@ -3332,29 +3296,45 @@ class MainWindow(QMainWindow):
 
     
     def show_about_window(self):
-        # Créer un QWidget personnalisé (au lieu de QMessageBox)
         about_window = QDialog(self)
-        about_window.setWindowTitle(self.t("about_title")) # Traduction du titre
+        about_window.setWindowTitle(self.t("about_title"))
 
-        # Créer le layout principal
         main_layout = QVBoxLayout(about_window)
 
-        # Créer une zone de défilement pour le texte
         scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)  # Permet au contenu de se redimensionner
+        scroll_area.setWidgetResizable(True)
         main_layout.addWidget(scroll_area)
 
-        # Créer un QWebEngineView LOCAL pour afficher le contenu HTML
-        # NE PAS utiliser self.html_preview ici — cela écraserait le widget de prévisualisation principal
-        about_web_view = QWebEngineView()
-        scroll_area.setWidget(about_web_view)
+        # Créer un QWebEngineView LOCAL (ne PAS utiliser self.html_preview qui
+        # appartient à la zone de prévisualisation principale).
+        # Protégé : si QtWebEngine est cassé, on bascule sur un QTextEdit.
+        about_web_view = None
+        fallback = None
 
-        # Texte principal de la boîte "à propos"
+        if WEB_ENGINE_AVAILABLE and QWebEngineView is not None:
+            try:
+                about_web_view = QWebEngineView()
+                scroll_area.setWidget(about_web_view)
+            except Exception as e:
+                print(f"[WARN] QWebEngineView indisponible pour À propos : {e}")
+                about_web_view = None
+
+        if about_web_view is None:
+            fallback = QTextEdit()
+            fallback.setReadOnly(True)
+            fallback.setPlainText(
+                self.t("error_webengine_unavailable")
+                if "error_webengine_unavailable" in self.translations.get(self.current_language, {})
+                else "La prévisualisation HTML n'est pas disponible sur cette machine."
+            )
+            scroll_area.setWidget(fallback)
+
+        # Texte principal
         cwd = os.getcwd()
         about_html = self.translations.get(self.current_language, {}).get("about_full_text", "").format(cwd=cwd)
 
-        # Charger le contenu HTML dans le QWebEngineView local
-        about_web_view.setHtml(about_html)
+        if about_web_view:
+            about_web_view.setHtml(about_html)
 
         # Boutons de langue
         self.add_language_buttons(main_layout)
@@ -3364,34 +3344,35 @@ class MainWindow(QMainWindow):
         self.close_button.clicked.connect(about_window.close)
         main_layout.addWidget(self.close_button, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        # Gestion du chemin pour la documentation "info.html"
+        # Chargement du fichier info.html de documentation
         try:
-            # Si l'application est compilée, chercher dans _MEIPASS
-            if hasattr(sys, '_MEIPASS'):  # Si l'application est compilée
+            if hasattr(sys, '_MEIPASS'):
                 info_path = Path(sys._MEIPASS) / 'assets' / 'info.html'
             else:
                 info_path = config.ASSETS_DIR / 'info.html'
 
-            # Vérifier si le fichier existe
             if info_path.exists():
                 with open(info_path, 'r', encoding='utf-8') as file:
                     info_html = file.read()
-                    about_web_view.setHtml(info_html)  # Afficher le contenu de info.html dans la fenêtre "à propos"
+                if about_web_view:
+                    about_web_view.setHtml(info_html)
+                elif fallback:
+                    from bs4 import BeautifulSoup
+                    fallback.setPlainText(BeautifulSoup(info_html, "html.parser").get_text())
             else:
                 QMessageBox.warning(self, "Erreur", "Impossible de trouver la documentation.")
                 return
 
         except Exception as e:
             print(f"[ERROR] Error loading info.html: {e}")
-            about_web_view.setHtml(self.t("error_loading_info"))  # Message d'erreur
+            err_msg = self.t("error_loading_info")
+            if about_web_view:
+                about_web_view.setHtml(err_msg)
+            elif fallback:
+                fallback.setPlainText(err_msg)
 
-        # === Définir la taille minimale de la fenêtre ===
-        about_window.setMinimumSize(600, 400)  # Par exemple, 600x400 pixels pour la fenêtre
-
-        # ajuster la taille automatique selon le contenu
-        about_window.resize(600, 400)  # définir une taille de départ
-
-        # Affichage
+        about_window.setMinimumSize(600, 400)
+        about_window.resize(600, 400)
         about_window.exec()
 
 
@@ -3440,18 +3421,47 @@ class MainWindow(QMainWindow):
 
     
     def eventFilter(self, obj, event):
-        # Opacité animée du bouton accordéon sidebar
+        # ── Opacité animée du bouton accordéon sidebar ────────────────
         if hasattr(self, "_sidebar_btn") and obj is self._sidebar_btn:
             if hasattr(self, "_sidebar_btn_effect"):
                 if event.type() == QEvent.Enter:
                     self._animate_sidebar_btn_opacity(1.0)
                 elif event.type() == QEvent.Leave:
                     self._animate_sidebar_btn_opacity(0.32)
+
+        # ── Grossissement des boutons au survol ───────────────────────
         if isinstance(obj, QPushButton) and obj is not getattr(self, "_sidebar_btn", None):
             if event.type() == QEvent.Enter:
                 obj.setIconSize(QSize(42, 42))
             elif event.type() == QEvent.Leave:
                 obj.setIconSize(QSize(32, 32))
+
+        # ── Déplacement à la souris dans les images / PDF ─────────────
+        try:
+            scroll_vp = self.image_scroll.viewport()
+        except RuntimeError:
+            return super().eventFilter(obj, event)
+
+        if obj is scroll_vp:
+            if event.type() == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
+                self._drag_start_pos = event.pos()
+                obj.setCursor(Qt.ClosedHandCursor)
+                return True
+            elif event.type() == QEvent.MouseMove and getattr(self, "_drag_start_pos", None):
+                delta = self._drag_start_pos - event.pos()
+                self.image_scroll.horizontalScrollBar().setValue(
+                    self.image_scroll.horizontalScrollBar().value() + delta.x()
+                )
+                self.image_scroll.verticalScrollBar().setValue(
+                    self.image_scroll.verticalScrollBar().value() + delta.y()
+                )
+                self._drag_start_pos = event.pos()
+                return True
+            elif event.type() == QEvent.MouseButtonRelease:
+                self._drag_start_pos = None
+                obj.setCursor(Qt.OpenHandCursor)
+                return True
+
         return super().eventFilter(obj, event)
 
     def _animate_sidebar_btn_opacity(self, target: float):
@@ -3475,6 +3485,25 @@ class MainWindow(QMainWindow):
         button.setIconSize(QSize(32, 32))
         button.installEventFilter(self)
 
+    def _ensure_html_preview(self) -> bool:
+        """
+        Crée QWebEngineView uniquement au premier besoin (lazy loading).
+        Évite de lancer Chromium dès le démarrage, ce qui provoquait des
+        crashs DLL sur certaines configs Windows (GPU hybride, pilotes virtuels).
+        Retourne True si le widget est disponible et prêt, False sinon.
+        """
+        if self.html_preview is not None:
+            return True
+        if not WEB_ENGINE_AVAILABLE or QWebEngineView is None:
+            return False
+        try:
+            self.html_preview = QWebEngineView()
+            self.preview_stack.addWidget(self.html_preview)
+            return True
+        except Exception as e:
+            print(f"[WARN] QtWebEngine indisponible à la création : {e}")
+            self.html_preview = None
+            return False
 
     def render_current_pdf_page(self, dpi=150, adapt_to_width=False):
         # Guard: pdf_doc peut être mis à None par clear_preview pendant le rendu
@@ -3489,7 +3518,7 @@ class MainWindow(QMainWindow):
             page = self.pdf_doc.load_page(self.current_pdf_page)
             pix = page.get_pixmap(dpi=dpi)
             mode = QImage.Format_RGB888 if pix.alpha == 0 else QImage.Format_RGBA8888
-            img = QImage(pix.samples, pix.width, pix.height, pix.stride, mode)
+            img = QImage(pix.samples, pix.width, pix.height, pix.stride, mode).copy()
             pixmap = QPixmap.fromImage(img)
 
             if pixmap.isNull():
@@ -3604,7 +3633,7 @@ class MainWindow(QMainWindow):
                     tmp.write(full_html)
                     tmp.close()
 
-                    if WEB_ENGINE_AVAILABLE and self.html_preview:
+                    if self._ensure_html_preview():
                         # même logique que pour EPUB : supprimer ancien fichier et recréer html_preview
                         self.html_preview.load(QUrl.fromLocalFile(tmp.name))
                         self.show_preview_widget(self.html_preview)
@@ -3709,29 +3738,6 @@ class MainWindow(QMainWindow):
             self.current_pdf_page += 1
             self.render_current_pdf_page()
 
-    def eventFilter(self, source, event):
-        try:
-            scroll_vp = self.image_scroll.viewport()
-        except RuntimeError:
-            return super().eventFilter(source, event)
-        if source is scroll_vp:
-            if event.type() == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
-                self._drag_start_pos = event.pos()
-                source.setCursor(Qt.ClosedHandCursor)
-                return True
-            elif event.type() == QEvent.MouseMove and self._drag_start_pos:
-                delta = self._drag_start_pos - event.pos()
-                self.image_scroll.horizontalScrollBar().setValue(
-                    self.image_scroll.horizontalScrollBar().value() + delta.x())
-                self.image_scroll.verticalScrollBar().setValue(
-                    self.image_scroll.verticalScrollBar().value() + delta.y())
-                self._drag_start_pos = event.pos()
-                return True
-            elif event.type() == QEvent.MouseButtonRelease:
-                self._drag_start_pos = None
-                source.setCursor(Qt.OpenHandCursor)
-                return True
-        return super().eventFilter(source, event)
 
     def load_image_file(self, image_path):
         pixmap = QPixmap(str(image_path))
@@ -3844,6 +3850,7 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(0)
         self.progress_bar.setVisible(True)
         self.reindex_button.setEnabled(False)
+        self._is_reindexing = True
 
         self.worker_thread = QThread()
         self.worker = ReindexWorker()
@@ -3861,9 +3868,6 @@ class MainWindow(QMainWindow):
         # Libérer les objets
         self.worker.finished.connect(self.worker.deleteLater)
         self.worker_thread.finished.connect(self.worker_thread.deleteLater)
-
-        # Attendre la fin réelle du thread
-        self.worker_thread.finished.connect(lambda: self.worker_thread.wait())
 
         self.worker_thread.start()
 
@@ -4019,6 +4023,7 @@ class MainWindow(QMainWindow):
 
 
     def on_reindex_done(self, count):
+        self._is_reindexing = False
         print(f"[INFO] Réindexation : {count} fichier(s) détecté(s)")
 
         # Mémoriser le contexte AVANT de reconstruire l'arbre.
@@ -4148,6 +4153,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"✅  {msg_text}", 5000)
 
     def on_reindex_error(self, error):
+        self._is_reindexing = False
         try:
             self.worker.progress.disconnect()
             self.worker.error.disconnect()
@@ -4257,28 +4263,212 @@ class MainWindow(QMainWindow):
         self._select_tree_folder_by_rel_path(rel)
         self.file_info_label.setText(f"📂  {abs_path.name}")
 
+    # ──────────────────────────────────────────────────────────────────
+    # IMPRESSION
+    # ──────────────────────────────────────────────────────────────────
+
     def _print_previewed_file(self):
-        """Imprime le fichier actuellement prévisualisé."""
-        if not self.previewed_file_path or not self.previewed_file_path.exists():
+        """
+        Imprime le fichier actuellement prévisualisé.
+        • PDF  → dialogue PrintRangeDialog (pages au choix) + rendu fitz → QPrinter
+        • HTML / DOCX / ODT  → impression via QWebEnginePage.print()
+        • Image  → mise à l'échelle + QPrinter
+        • Autres → fallback système (lpr / os.startfile)
+        """
+        if not self.previewed_file_path or not path_exists(self.previewed_file_path):
+            return
+
+        ext = os.path.splitext(self.previewed_file_path)[1].lower()
+
+        # ── PDF ───────────────────────────────────────────────────────
+        if ext == ".pdf":
+            pdf_doc = getattr(self, "pdf_doc", None)
+            if not pdf_doc:
+                try:
+                    pdf_doc = fitz.open(win_path(self.previewed_file_path))
+                except Exception as e:
+                    QMessageBox.warning(self, self.t("error_title"), str(e))
+                    return
+            current = getattr(self, "current_pdf_page", 0)
+            dlg = PrintRangeDialog(pdf_doc.page_count, current, self.t, self)
+            if dlg.exec() != QDialog.DialogCode.Accepted:
+                return
+            pages = dlg.get_pages()
+            if pages:
+                self._print_pdf_pages_via_qt(pdf_doc, pages)
+            return
+
+        # ── HTML / DOCX / ODT via WebEngine ──────────────────────────
+        if (ext in (".html", ".htm", ".docx", ".odt")
+                and self._ensure_html_preview()):
+            self._print_via_webengine()
+            return
+
+        # ── Images ───────────────────────────────────────────────────
+        if ext in (".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tif", ".tiff"):
+            self._print_image_via_qt()
+            return
+
+        # ── Autres formats : fallback système ────────────────────────
+        self._system_print(self.previewed_file_path)
+
+    # ------------------------------------------------------------------
+    def _print_file(self, rel_path: str):
+        """
+        Imprime le fichier sélectionné dans le navigateur de dossiers.
+        • PDF  → dialogue PrintRangeDialog + rendu fitz → QPrinter
+        • Autres → fallback système
+        """
+        abs_path = config.FILES_DIR / rel_path
+        if not path_exists(abs_path):
+            return
+
+        ext = os.path.splitext(abs_path)[1].lower()
+
+        if ext == ".pdf":
+            try:
+                pdf_doc = fitz.open(win_path(abs_path))
+            except Exception as e:
+                QMessageBox.warning(self, self.t("error_title"), str(e))
+                return
+            dlg = PrintRangeDialog(pdf_doc.page_count, 0, self.t, self)
+            if dlg.exec() != QDialog.DialogCode.Accepted:
+                return
+            pages = dlg.get_pages()
+            if pages:
+                self._print_pdf_pages_via_qt(pdf_doc, pages)
+            return
+
+        self._system_print(abs_path)
+
+    # ------------------------------------------------------------------
+    def _print_pdf_pages_via_qt(self, pdf_doc, pages: list):
+        """
+        Rend les pages sélectionnées d'un fitz.Document sur QPrinter via QPainter.
+        Affiche d'abord le dialogue natif de sélection d'imprimante.
+        """
+        try:
+            from PySide6.QtPrintSupport import QPrinter, QPrintDialog
+            from PySide6.QtGui import QPainter
+        except ImportError:
+            # Module QtPrintSupport absent (rare) → fallback système
+            self._system_print(self.previewed_file_path)
+            return
+
+        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+        dialog  = QPrintDialog(printer, self)
+        dialog.setWindowTitle(self.t("print_dialog_title") or "Imprimer")
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        painter = QPainter()
+        if not painter.begin(printer):
+            QMessageBox.warning(
+                self, self.t("error_title"),
+                self.t("print_error_init") or "Impossible d'initialiser l'imprimante."
+            )
             return
         try:
-            import subprocess, sys, shutil
+            dpi  = printer.resolution()
+            zoom = dpi / 72.0
+            mat  = fitz.Matrix(zoom, zoom)
+
+            for i, page_idx in enumerate(pages):
+                if i > 0:
+                    printer.newPage()
+                page = pdf_doc.load_page(page_idx)
+                pix  = page.get_pixmap(matrix=mat, alpha=False)
+                img  = QImage(pix.samples, pix.width, pix.height,
+                              pix.stride, QImage.Format.Format_RGB888).copy()
+                rect = painter.viewport()
+                painter.drawImage(rect, img)
+        finally:
+            painter.end()
+
+        n = len(pages)
+        QMessageBox.information(
+            self,
+            self.t("print_dialog_title") or "Imprimer",
+            (self.t("print_success") or "Impression envoyée ({n} page(s)).").format(n=n)
+        )
+
+    # ------------------------------------------------------------------
+    def _print_via_webengine(self):
+        """Imprime le contenu rendu dans QWebEngineView via QPrinter natif."""
+        try:
+            from PySide6.QtPrintSupport import QPrinter, QPrintDialog
+        except ImportError:
+            self._system_print(self.previewed_file_path)
+            return
+
+        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+        dialog  = QPrintDialog(printer, self)
+        dialog.setWindowTitle(self.t("print_dialog_title") or "Imprimer")
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        def _on_done(ok):
+            if not ok:
+                QMessageBox.warning(
+                    self, self.t("error_title"),
+                    self.t("print_error_init") or "Erreur lors de l'impression."
+                )
+
+        self.html_preview.page().print(printer, _on_done)
+
+    # ------------------------------------------------------------------
+    def _print_image_via_qt(self):
+        """Imprime l'image prévisualisée en la mettant à l'échelle de la page."""
+        try:
+            from PySide6.QtPrintSupport import QPrinter, QPrintDialog
+            from PySide6.QtGui import QPainter
+        except ImportError:
+            self._system_print(self.previewed_file_path)
+            return
+
+        pixmap = getattr(self, "original_pixmap", None)
+        if not pixmap or pixmap.isNull():
+            return
+
+        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+        dialog  = QPrintDialog(printer, self)
+        dialog.setWindowTitle(self.t("print_dialog_title") or "Imprimer")
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        painter = QPainter(printer)
+        rect    = painter.viewport()
+        scaled  = pixmap.scaled(
+            rect.size(),
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation
+        )
+        painter.drawPixmap(0, 0, scaled)
+        painter.end()
+
+    # ------------------------------------------------------------------
+    def _system_print(self, file_path):
+        """
+        Impression système sans sélection de pages (fallback pour formats
+        non-PDF ou si QtPrintSupport est absent).
+        """
+        try:
             if sys.platform.startswith("win"):
-                import os
-                os.startfile(str(self.previewed_file_path), "print")
+                os.startfile(str(file_path), "print")
             elif sys.platform.startswith("darwin"):
-                result = subprocess.run(["lpr", str(self.previewed_file_path)],
+                result = subprocess.run(["lpr", str(file_path)],
                                         capture_output=True, text=True)
                 if result.returncode != 0:
                     self._show_print_error(result.stderr)
             else:
                 from database.path_utils import _clean_env_for_subprocess
-                env = _clean_env_for_subprocess()
+                env   = _clean_env_for_subprocess()
                 check = subprocess.run(["lpstat", "-d"],
                                        capture_output=True, text=True, env=env)
-                if ("no system default" in check.stdout.lower()
-                        or "aucune destination" in check.stdout.lower()
-                        or check.returncode != 0):
+                no_default = ("no system default" in check.stdout.lower()
+                              or "aucune destination" in check.stdout.lower()
+                              or check.returncode != 0)
+                if no_default:
                     self._show_print_error(
                         self.t("print_no_default") if "print_no_default" in
                         self.translations.get(self.current_language, {})
@@ -4287,75 +4477,23 @@ class MainWindow(QMainWindow):
                              "• Ou : lpoptions -d <nom_imprimante>"
                     )
                     return
-                result = subprocess.run(["lpr", str(self.previewed_file_path)],
+                result = subprocess.run(["lpr", str(file_path)],
                                         capture_output=True, text=True, env=env)
                 if result.returncode != 0:
                     self._show_print_error(result.stderr or result.stdout)
-        except FileNotFoundError:
-            self._show_print_error("La commande 'lpr' est introuvable.\nInstallez CUPS : sudo apt install cups")
-        except Exception as e:
-            QMessageBox.warning(self, self.t("error_title"), f"Impossible d'imprimer : {e}")
-
-    def _print_file(self, rel_path: str):
-        """Imprime le fichier sélectionné dans le navigateur."""
-        import subprocess, sys, shutil
-        abs_path = config.FILES_DIR / rel_path
-        if not abs_path.exists():
-            return
-        try:
-            if sys.platform.startswith("win"):
-                import os
-                os.startfile(str(abs_path), "print")
-
-            elif sys.platform.startswith("darwin"):
-                result = subprocess.run(["lpr", str(abs_path)],
-                                        capture_output=True, text=True)
-                if result.returncode != 0:
-                    self._show_print_error(result.stderr)
-
-            else:
-                # Linux : vérifier qu'une imprimante par défaut existe
-                from database.path_utils import _clean_env_for_subprocess
-                env = _clean_env_for_subprocess()
-
-                # lpstat -d donne l'imprimante par défaut
-                check = subprocess.run(["lpstat", "-d"],
-                                       capture_output=True, text=True, env=env)
-                no_default = ("no system default destination" in check.stdout.lower()
-                              or "aucune destination" in check.stdout.lower()
-                              or check.returncode != 0)
-
-                if no_default:
-                    self._show_print_error(
-                        self.t("print_no_default") if "print_no_default" in
-                        self.translations.get(self.current_language, {})
-                        else "Aucune imprimante par défaut configurée.\n\n"
-                             "Pour configurer une imprimante :\n"
-                             "• Ouvrez les paramètres système → Imprimantes\n"
-                             "• Ou installez CUPS : sudo apt install cups\n"
-                             "• Puis définissez une imprimante par défaut avec :\n"
-                             "  lpoptions -d <nom_imprimante>"
-                    )
-                    return
-
-                result = subprocess.run(["lpr", str(abs_path)],
-                                        capture_output=True, text=True, env=env)
-                if result.returncode != 0:
-                    self._show_print_error(result.stderr or result.stdout)
-
         except FileNotFoundError:
             self._show_print_error(
-                "La commande 'lpr' est introuvable.\n\n"
-                "Installez CUPS : sudo apt install cups"
+                "La commande 'lpr' est introuvable.\nInstallez CUPS : sudo apt install cups"
             )
         except Exception as e:
             QMessageBox.warning(self, self.t("error_title"),
                                 f"Impossible d'imprimer : {e}")
 
+    # ------------------------------------------------------------------
     def _show_print_error(self, detail: str):
-        """Affiche un message d'erreur d'impression clair."""
+        """Affiche un message d'erreur d'impression."""
         msg = QMessageBox(self)
-        msg.setIcon(QMessageBox.Warning)
+        msg.setIcon(QMessageBox.Icon.Warning)
         msg.setWindowTitle(self.t("error_title"))
         msg.setText(detail.strip())
         msg.exec()
@@ -4451,7 +4589,7 @@ class MainWindow(QMainWindow):
         try:
             # === HTML ===
             if ext in [".html", ".htm"]:
-                if WEB_ENGINE_AVAILABLE and self.html_preview:
+                if self._ensure_html_preview():
                     import time
                     url = QUrl(QUrl.fromLocalFile(str(doc_path)))
                     url.setFragment(f"_r{int(time.time()*1000)}")
@@ -4516,7 +4654,8 @@ class MainWindow(QMainWindow):
 
                     image = image.convert("RGBA")
                     data = image.tobytes("raw", "RGBA")
-                    qim = QImage(data, image.width, image.height, QImage.Format_RGBA8888)
+                    qim = QImage(data, image.width, image.height,
+                                 image.width * 4, QImage.Format_RGBA8888).copy()
                     pixmap = QPixmap.fromImage(qim)
 
                     if pixmap.isNull():
@@ -4531,7 +4670,7 @@ class MainWindow(QMainWindow):
             # === DOCX ===
             elif ext == ".docx":
                 html = self.show_docx_preview(doc_path)
-                if html and WEB_ENGINE_AVAILABLE and self.html_preview:
+                if html and self._ensure_html_preview():
                     import time
                     self.html_preview.show()
                     self.html_preview.setHtml(html + f'<span id="_r{int(time.time()*1000)}" style="display:none"></span>')
@@ -4554,7 +4693,7 @@ class MainWindow(QMainWindow):
             # === ODT ===
             elif ext == ".odt":
                 html = odf_utils.odf_to_html(doc_path)
-                if html and WEB_ENGINE_AVAILABLE and self.html_preview:
+                if html and self._ensure_html_preview():
                     import time
                     self.html_preview.show()
                     self.html_preview.setHtml(html + f'<span id="_r{int(time.time()*1000)}" style="display:none"></span>')
@@ -4646,7 +4785,7 @@ class MainWindow(QMainWindow):
         self._unsupported_path   = doc_path
         self._unsupported_custom = custom_app
 
-        if WEB_ENGINE_AVAILABLE and self.html_preview:
+        if self._ensure_html_preview():
             import time
             try:
                 self.html_preview.page().urlChanged.disconnect()
@@ -4780,12 +4919,10 @@ class MainWindow(QMainWindow):
 
     def show_mhtml_preview(self, doc_path):
         """Prévisualise un fichier MHTML via QWebEngineView (support natif)."""
-        if not WEB_ENGINE_AVAILABLE:
+        if not self._ensure_html_preview():
             self.show_text_preview(self.t("error_webengine_unavailable"))
             return
 
-        if not self.html_preview:
-            return
         import time
         url = QUrl(QUrl.fromLocalFile(str(doc_path)))
         url.setFragment(f"_r{int(time.time()*1000)}")
@@ -4847,7 +4984,7 @@ class MainWindow(QMainWindow):
             self.show_text_preview(f"Erreur lecture EML : {e}")
 
     def show_html_preview(self, html: str):
-        if not WEB_ENGINE_AVAILABLE or not self.html_preview:
+        if not self._ensure_html_preview():
             self.show_text_preview(html)
             return
         import time
@@ -4895,11 +5032,9 @@ class MainWindow(QMainWindow):
             self.show_text_preview(self.t("textfile_read_error").format(error=str(e)))
 
     def show_xml_preview(self, rel_path):
-        from PySide6.QtWebEngineWidgets import QWebEngineView
-
         file_path = config.FILES_DIR / rel_path
 
-        if not WEB_ENGINE_AVAILABLE:
+        if not self._ensure_html_preview():
             self.show_text_preview(self.t("disabled_html_preview"))
             return
 
@@ -4907,8 +5042,6 @@ class MainWindow(QMainWindow):
             self.preview_stack.removeWidget(self.xml_preview)
             self.xml_preview.deleteLater()
 
-        if not self.html_preview:
-            return
         import time
         url = QUrl(QUrl.fromLocalFile(str(file_path)))
         url.setFragment(f"_r{int(time.time()*1000)}")
@@ -4917,11 +5050,10 @@ class MainWindow(QMainWindow):
         self.preview_stack.setCurrentWidget(self.html_preview)
 
     def show_svg_preview(self, rel_path):
-        from PySide6.QtWebEngineWidgets import QWebEngineView
 
         file_path = config.FILES_DIR / rel_path
 
-        if not WEB_ENGINE_AVAILABLE or not self.html_preview:
+        if not self._ensure_html_preview():
             self.show_text_preview(self.t("disabled_html_preview"))
             return
 
@@ -6362,7 +6494,6 @@ class MainWindow(QMainWindow):
             )
 
 from PySide6.QtCore import QPropertyAnimation
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QGraphicsOpacityEffect
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFontMetrics
 from styles import get_tag_widget_style
